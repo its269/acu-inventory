@@ -77,6 +77,8 @@ export default function SignInPage() {
                 return;
             }
 
+            // Store the display name so dashboard can greet the user
+            localStorage.setItem("userName", username);
             // Redirect to dashboard after successful login
             router.push("/dashboard");
         } catch (err) {

@@ -58,6 +58,12 @@
     transition: background 0.15s, color 0.15s;
 }
 
+.db-nav-right {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+}
+
 .db-nav-logout:hover {
     background: rgba(255, 255, 255, 0.14);
     color: #ffffff;
@@ -243,7 +249,61 @@
     border-color: #9ca3af;
 }
 
-/* ── Error ─────────────────────────────────────────────── */
+/* ── Error card ─────────────────────────────────────────── */
+.db-error-card {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+    background: #fff;
+    border: 1px solid #fecaca;
+    border-left: 4px solid #ef4444;
+    border-radius: 10px;
+    padding: 1rem 1.25rem;
+}
+
+.db-error-icon {
+    flex-shrink: 0;
+    color: #ef4444;
+    display: flex;
+    align-items: center;
+}
+
+.db-error-body {
+    flex: 1;
+    min-width: 0;
+}
+
+.db-error-title {
+    font-size: 0.875rem;
+    font-weight: 700;
+    color: #111827;
+    margin-bottom: 0.15rem;
+}
+
+.db-error-msg {
+    font-size: 0.8rem;
+    color: #6b7280;
+}
+
+.db-error-retry {
+    flex-shrink: 0;
+    padding: 0.45rem 1rem;
+    background: #fff;
+    border: 1px solid #d1d5db;
+    border-radius: 7px;
+    font-size: 0.82rem;
+    font-weight: 600;
+    color: #374151;
+    cursor: pointer;
+    transition: background 0.15s, border-color 0.15s;
+}
+
+.db-error-retry:hover {
+    background: #f3f4f6;
+    border-color: #9ca3af;
+}
+
+/* ── Error (legacy inline, kept for safety) ─────────────── */
 .db-error {
     background: #fef2f2;
     border: 1px solid #fecaca;
@@ -273,6 +333,43 @@
     padding: 4rem 2rem;
     color: #6b7280;
     font-size: 0.875rem;
+}
+
+/* ── Stream progress bar (shown while rows are streaming in) ── */
+.db-stream-bar {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.45rem 1rem;
+    background: #f0f9ff;
+    border: 1px solid #bae6fd;
+    border-radius: 6px;
+    font-size: 0.78rem;
+    color: #0369a1;
+    margin-bottom: 0.5rem;
+}
+
+.db-stream-pulse {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: #0ea5e9;
+    animation: pulse-dot 1s ease-in-out infinite;
+    flex-shrink: 0;
+}
+
+@keyframes pulse-dot {
+
+    0%,
+    100% {
+        opacity: 1;
+        transform: scale(1);
+    }
+
+    50% {
+        opacity: 0.4;
+        transform: scale(0.7);
+    }
 }
 
 .db-spinner {
@@ -489,6 +586,603 @@
     color: #ffffff !important;
 }
 
+/* ── User chip in nav ──────────────────────────────────── */
+.db-user-chip {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.3rem 0.75rem 0.3rem 0.3rem;
+    background: rgba(255, 255, 255, 0.07);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 999px;
+}
+
+.db-user-avatar {
+    width: 28px;
+    height: 28px;
+    background: #4f46e5;
+    color: #fff;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 0.68rem;
+    font-weight: 700;
+    letter-spacing: 0.03em;
+    flex-shrink: 0;
+}
+
+.db-user-name {
+    font-size: 0.82rem;
+    font-weight: 500;
+    color: #e5e7eb;
+    max-width: 140px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+/* ── Stat card variants ─────────────────────────────────── */
+.db-stat-sub {
+    font-size: 0.72rem;
+    color: #9ca3af;
+    margin-top: 0.1rem;
+}
+
+.db-stat-warn {
+    border-left: 3px solid #f59e0b;
+}
+
+.db-stat-warn .db-stat-value {
+    color: #d97706;
+}
+
+.db-stat-danger {
+    border-left: 3px solid #ef4444;
+}
+
+.db-stat-danger .db-stat-value {
+    color: #dc2626;
+}
+
+/* ── Toolbar right side action buttons ─────────────────── */
+.db-toolbar-right {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    flex-wrap: wrap;
+}
+
+.db-action-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+    padding: 0.55rem 0.9rem;
+    background: #ffffff;
+    border: 1px solid #d1d5db;
+    border-radius: 8px;
+    font-size: 0.82rem;
+    font-weight: 500;
+    color: #374151;
+    cursor: pointer;
+    white-space: nowrap;
+    transition: background 0.15s, border-color 0.15s, color 0.15s;
+    position: relative;
+}
+
+.db-action-btn:hover {
+    background: #f3f4f6;
+    border-color: #9ca3af;
+}
+
+.db-action-transfer {
+    color: #1d4ed8;
+    border-color: #bfdbfe;
+    background: #eff6ff;
+}
+
+.db-action-transfer:hover {
+    background: #dbeafe;
+    border-color: #93c5fd;
+}
+
+.db-action-po {
+    color: #065f46;
+    border-color: #a7f3d0;
+    background: #ecfdf5;
+}
+
+.db-action-po:hover {
+    background: #d1fae5;
+    border-color: #6ee7b7;
+}
+
+.db-action-audit {
+    color: #6d28d9;
+    border-color: #ddd6fe;
+    background: #f5f3ff;
+}
+
+.db-action-audit:hover {
+    background: #ede9fe;
+    border-color: #c4b5fd;
+}
+
+/* Badge count on audit button */
+.db-badge-count {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 18px;
+    height: 18px;
+    padding: 0 4px;
+    background: #6d28d9;
+    color: #fff;
+    border-radius: 999px;
+    font-size: 0.68rem;
+    font-weight: 700;
+    line-height: 1;
+}
+
+/* ── Status badges ──────────────────────────────────────── */
+.db-status-badge {
+    display: inline-block;
+    font-size: 0.72rem;
+    font-weight: 700;
+    padding: 0.22rem 0.65rem;
+    border-radius: 999px;
+    white-space: nowrap;
+}
+
+.db-status-in {
+    background: #dcfce7;
+    color: #15803d;
+}
+
+.db-status-low {
+    background: #fef3c7;
+    color: #b45309;
+    animation: db-pulse-warn 2s ease-in-out infinite;
+}
+
+.db-status-out {
+    background: #fee2e2;
+    color: #b91c1c;
+}
+
+@keyframes db-pulse-warn {
+
+    0%,
+    100% {
+        opacity: 1;
+    }
+
+    50% {
+        opacity: 0.65;
+    }
+}
+
+/* ── Row highlight for stock issues ─────────────────────── */
+.db-row-warn td {
+    background: #fffbeb;
+}
+
+.db-row-warn:hover td {
+    background: #fef3c7 !important;
+}
+
+.db-row-danger td {
+    background: #fff5f5;
+}
+
+.db-row-danger:hover td {
+    background: #fee2e2 !important;
+}
+
+/* ── Modals ─────────────────────────────────────────────── */
+.db-modal-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 200;
+    background: rgba(0, 0, 0, 0.45);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 1rem;
+    backdrop-filter: blur(2px);
+}
+
+.db-modal {
+    background: #ffffff;
+    border-radius: 14px;
+    box-shadow: 0 20px 60px rgba(0, 0, 0, 0.18);
+    width: 100%;
+    max-width: 520px;
+    max-height: 90vh;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+}
+
+.db-modal-wide {
+    max-width: 680px;
+}
+
+.db-modal-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 1.1rem 1.25rem;
+    border-bottom: 1px solid #f3f4f6;
+    position: sticky;
+    top: 0;
+    background: #fff;
+    z-index: 1;
+    border-radius: 14px 14px 0 0;
+}
+
+.db-modal-title {
+    display: flex;
+    align-items: center;
+    gap: 0.55rem;
+    font-size: 0.95rem;
+    font-weight: 700;
+    color: #111827;
+}
+
+.db-modal-close {
+    background: none;
+    border: none;
+    cursor: pointer;
+    color: #6b7280;
+    padding: 0.25rem;
+    border-radius: 6px;
+    display: flex;
+    align-items: center;
+    transition: background 0.12s, color 0.12s;
+}
+
+.db-modal-close:hover {
+    background: #f3f4f6;
+    color: #111827;
+}
+
+.db-modal-body {
+    padding: 1.25rem;
+    display: flex;
+    flex-direction: column;
+    gap: 1rem;
+    flex: 1;
+}
+
+.db-modal-footer {
+    display: flex;
+    justify-content: flex-end;
+    gap: 0.6rem;
+    padding-top: 0.5rem;
+    border-top: 1px solid #f3f4f6;
+    margin-top: 0.5rem;
+}
+
+/* ── Transfer steps progress ────────────────────────────── */
+.db-transfer-steps {
+    display: flex;
+    align-items: center;
+    gap: 0.35rem;
+    background: #f9fafb;
+    border: 1px solid #e5e7eb;
+    border-radius: 8px;
+    padding: 0.65rem 1rem;
+    margin-bottom: 0.25rem;
+}
+
+.db-step {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+    font-size: 0.78rem;
+    font-weight: 500;
+    color: #9ca3af;
+    white-space: nowrap;
+}
+
+.db-step span {
+    width: 20px;
+    height: 20px;
+    border-radius: 50%;
+    background: #e5e7eb;
+    color: #6b7280;
+    font-size: 0.7rem;
+    font-weight: 700;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.db-step-active {
+    color: #111827;
+}
+
+.db-step-active span {
+    background: #111827;
+    color: #fff;
+}
+
+.db-step-arrow {
+    color: #d1d5db;
+    font-size: 1rem;
+    line-height: 1;
+}
+
+/* ── Form fields inside modals ──────────────────────────── */
+.db-form-row {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 0.75rem;
+}
+
+.db-form-group {
+    display: flex;
+    flex-direction: column;
+    gap: 0.35rem;
+}
+
+.db-form-group label {
+    font-size: 0.78rem;
+    font-weight: 600;
+    color: #374151;
+}
+
+.db-form-group input,
+.db-form-group select {
+    padding: 0.58rem 0.75rem;
+    border: 1px solid #d1d5db;
+    border-radius: 8px;
+    font-size: 0.85rem;
+    color: #111827;
+    background: #fff;
+    outline: none;
+    transition: border-color 0.15s, box-shadow 0.15s;
+    width: 100%;
+}
+
+.db-form-group input:focus,
+.db-form-group select:focus {
+    border-color: #4f46e5;
+    box-shadow: 0 0 0 3px rgba(79, 70, 229, 0.1);
+}
+
+/* ── PO-specific ────────────────────────────────────────── */
+.db-po-items-label {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+}
+
+.db-po-items-label label {
+    font-size: 0.78rem;
+    font-weight: 600;
+    color: #374151;
+}
+
+.db-btn-add-item {
+    font-size: 0.78rem;
+    font-weight: 600;
+    color: #4f46e5;
+    background: none;
+    border: none;
+    cursor: pointer;
+    padding: 0.2rem 0.4rem;
+    border-radius: 4px;
+    transition: background 0.12s;
+}
+
+.db-btn-add-item:hover {
+    background: #ede9fe;
+}
+
+.db-po-item-row {
+    display: flex;
+    gap: 0.5rem;
+    align-items: center;
+}
+
+.db-po-item-row select {
+    flex: 1;
+    padding: 0.55rem 0.7rem;
+    border: 1px solid #d1d5db;
+    border-radius: 8px;
+    font-size: 0.82rem;
+    color: #111827;
+    background: #fff;
+    outline: none;
+}
+
+.db-po-item-row select:focus {
+    border-color: #4f46e5;
+}
+
+.db-po-item-row input[type="number"] {
+    width: 80px;
+    padding: 0.55rem 0.7rem;
+    border: 1px solid #d1d5db;
+    border-radius: 8px;
+    font-size: 0.82rem;
+    color: #111827;
+    outline: none;
+}
+
+.db-po-item-row input[type="number"]:focus {
+    border-color: #4f46e5;
+}
+
+.db-btn-remove-item {
+    width: 28px;
+    height: 28px;
+    border: 1px solid #fecaca;
+    background: #fff5f5;
+    color: #dc2626;
+    font-size: 1.1rem;
+    font-weight: 700;
+    border-radius: 6px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    transition: background 0.12s;
+}
+
+.db-btn-remove-item:hover {
+    background: #fee2e2;
+}
+
+/* ── Modal buttons ──────────────────────────────────────── */
+.db-btn-primary {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+    padding: 0.6rem 1.2rem;
+    background: #111827;
+    color: #fff;
+    border: none;
+    border-radius: 8px;
+    font-size: 0.85rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: background 0.15s;
+}
+
+.db-btn-primary:hover {
+    background: #1f2937;
+}
+
+.db-btn-secondary {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+    padding: 0.6rem 1.2rem;
+    background: #fff;
+    color: #374151;
+    border: 1px solid #d1d5db;
+    border-radius: 8px;
+    font-size: 0.85rem;
+    font-weight: 500;
+    cursor: pointer;
+    transition: background 0.15s;
+}
+
+.db-btn-secondary:hover {
+    background: #f3f4f6;
+}
+
+/* ── State center (transit / done) ─────────────────────── */
+.db-state-center {
+    align-items: center;
+    text-align: center;
+    padding: 2rem 1.5rem;
+    gap: 0.6rem;
+}
+
+.db-state-center h3 {
+    font-size: 1.1rem;
+    font-weight: 700;
+    color: #111827;
+    margin-top: 0.25rem;
+}
+
+.db-state-sub {
+    font-size: 0.875rem;
+    color: #6b7280;
+}
+
+.db-state-note {
+    font-size: 0.8rem;
+    color: #9ca3af;
+}
+
+.db-transit-label {
+    color: #1d4ed8;
+}
+
+.db-state-icon {
+    width: 64px;
+    height: 64px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.db-state-icon-blue {
+    background: #eff6ff;
+    color: #1d4ed8;
+}
+
+.db-state-icon-green {
+    background: #dcfce7;
+    color: #15803d;
+}
+
+.db-spinner-lg {
+    width: 36px;
+    height: 36px;
+    border-width: 3px;
+}
+
+/* ── Audit log list ─────────────────────────────────────── */
+.db-audit-empty {
+    text-align: center;
+    color: #9ca3af;
+    font-size: 0.875rem;
+    padding: 2rem 0;
+}
+
+.db-audit-list {
+    list-style: none;
+    display: flex;
+    flex-direction: column;
+    gap: 0;
+}
+
+.db-audit-entry {
+    display: grid;
+    grid-template-columns: 90px 110px 1fr;
+    gap: 0.75rem;
+    padding: 0.65rem 0.75rem;
+    border-bottom: 1px solid #f3f4f6;
+    font-size: 0.82rem;
+    align-items: center;
+    transition: background 0.1s;
+}
+
+.db-audit-entry:last-child {
+    border-bottom: none;
+}
+
+.db-audit-entry:hover {
+    background: #f9fafb;
+}
+
+.db-audit-time {
+    color: #9ca3af;
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+    font-size: 0.78rem;
+}
+
+.db-audit-user {
+    font-weight: 600;
+    color: #4f46e5;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.db-audit-action {
+    color: #374151;
+}
+
 /* ── Responsive ────────────────────────────────────────── */
 @media (max-width: 900px) {
     .db-stats {
@@ -517,6 +1211,10 @@
 
     .db-toolbar-left {
         flex-direction: column;
+    }
+
+    .db-toolbar-right {
+        flex-wrap: wrap;
     }
 
     .db-select-wrapper,
