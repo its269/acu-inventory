@@ -181,9 +181,16 @@ export default function DashboardPage() {
     const [po, setPO] = useState(clonePO);
     const [poSubmitted, setPOSubmitted] = useState(false);
 
-    /* ── Load username ──────────────────────────────── */
+    /* ── Load full name from localStorage ────────────── */
     useEffect(() => {
-        setUserName(localStorage.getItem("userName") || "User");
+        const full = localStorage.getItem("userName") || "";
+        const first = localStorage.getItem("userFirstName") || "";
+        const last = localStorage.getItem("userLastName") || "";
+        // Prefer the full name built from first+last; fall back to stored full, then "User"
+        const display = (first || last)
+            ? [first, last].filter(Boolean).join(" ")
+            : full || "User";
+        setUserName(display);
     }, []);
 
     /* ── Debounce search ────────────────────────────── */
@@ -316,7 +323,11 @@ export default function DashboardPage() {
     );
 
     /* ── Stable user info ───────────────────────────── */
-    const initials = useMemo(() => userName.slice(0, 2).toUpperCase(), [userName]);
+    const initials = useMemo(() => {
+        const parts = userName.trim().split(/\s+/);
+        if (parts.length >= 2) return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
+        return userName.slice(0, 2).toUpperCase();
+    }, [userName]);
 
     /* ── Stable callbacks ───────────────────────────── */
     const handleBranchChange = useCallback((e) => {
@@ -416,7 +427,7 @@ export default function DashboardPage() {
                     </div>
                     <button
                         className="db-nav-logout"
-                        onClick={() => { localStorage.removeItem("userName"); router.push("/signin"); }}
+                        onClick={() => { localStorage.removeItem("userName"); localStorage.removeItem("userFirstName"); localStorage.removeItem("userLastName"); router.push("/signin"); }}
                         title="Sign Out"
                     >
                         <IconLogout />

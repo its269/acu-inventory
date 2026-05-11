@@ -77,8 +77,23 @@ export default function SignInPage() {
                 return;
             }
 
-            // Store the display name so dashboard can greet the user
-            localStorage.setItem("userName", username);
+            // Fetch the user's full name (FirstName + LastName) from Acumatica
+            let displayName = username;
+            try {
+                const meRes = await fetch(`/api/auth/me?username=${encodeURIComponent(username)}`);
+                if (meRes.ok) {
+                    const meData = await meRes.json();
+                    if (meData?.fullName) displayName = meData.fullName;
+                    // Also persist first/last individually for flexible display
+                    if (meData?.first) localStorage.setItem("userFirstName", meData.first);
+                    if (meData?.last) localStorage.setItem("userLastName", meData.last);
+                }
+            } catch {
+                // Non-fatal — fall back to raw username
+            }
+
+            // Store the full display name for the dashboard greeting
+            localStorage.setItem("userName", displayName);
             // Redirect to dashboard after successful login
             router.push("/dashboard");
         } catch (err) {
