@@ -1,0 +1,275 @@
+/* ============================================================
+   Sign-In Page — Minimalist Style
+   External CSS — no Tailwind
+   ============================================================ */
+
+/* ---------- Reset ---------- */
+*,
+*::before,
+*::after {
+    box-sizing: border-box;
+    margin: 0;
+    padding: 0;
+}
+
+/* ---------- Wrapper ---------- */
+.signin-wrapper {
+    min-height: 100vh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background-color: #f5f5f5;
+    padding: 1.5rem;
+    font-family: "Inter", "Segoe UI", system-ui, -apple-system, sans-serif;
+}
+
+/* ---------- Card ---------- */
+.signin-card {
+    background: #ffffff;
+    border: 1px solid #e5e5e5;
+    border-radius: 12px;
+    padding: 2.5rem 2.25rem 2rem;
+    width: 100%;
+    max-width: 400px;
+    animation: fadeIn 0.3s ease;
+}
+
+@keyframes fadeIn {
+    from {
+        opacity: 0;
+        transform: translateY(12px);
+    }
+
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+/* ---------- Header ---------- */
+.signin-header {
+    margin-bottom: 2rem;
+}
+
+.signin-logo {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 40px;
+    height: 40px;
+    background-color: #111827;
+    border-radius: 8px;
+    color: #ffffff;
+    margin-bottom: 1.25rem;
+}
+
+.signin-title {
+    font-size: 1.375rem;
+    font-weight: 700;
+    color: #111827;
+    margin-bottom: 0.25rem;
+    letter-spacing: -0.02em;
+}
+
+.signin-subtitle {
+    font-size: 0.85rem;
+    color: #6b7280;
+}
+
+/* ---------- Form ---------- */
+.signin-form {
+    display: flex;
+    flex-direction: column;
+    gap: 1.125rem;
+}
+
+/* ---------- Error ---------- */
+.signin-error {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    background: #fef2f2;
+    border: 1px solid #fecaca;
+    color: #b91c1c;
+    border-radius: 8px;
+    padding: 0.65rem 0.875rem;
+    font-size: 0.8rem;
+    font-weight: 500;
+}
+
+/* ---------- Field ---------- */
+.signin-field {
+    display: flex;
+    flex-direction: column;
+    gap: 0.375rem;
+}
+
+.signin-label-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.signin-label {
+    font-size: 0.8125rem;
+    font-weight: 600;
+    color: #374151;
+    letter-spacing: 0.01em;
+}
+
+.signin-forgot {
+    font-size: 0.775rem;
+    color: #6b7280;
+    text-decoration: none;
+    transition: color 0.15s;
+}
+
+.signin-forgot:hover {
+    color: #111827;
+}
+
+/* ---------- Input ---------- */
+.signin-input-wrapper {
+    position: relative;
+    display: flex;
+    align-items: center;
+}
+
+.signin-input-icon {
+    position: absolute;
+    left: 0.75rem;
+    color: #9ca3af;
+    display: flex;
+    align-items: center;
+    pointer-events: none;
+    line-height: 0;
+}
+
+.signin-input {
+    width: 100%;
+    padding: 0.65rem 0.875rem 0.65rem 2.4rem;
+    border: 1px solid #d1d5db;
+    border-radius: 8px;
+    font-size: 0.875rem;
+    color: #111827;
+    background: #ffffff;
+    outline: none;
+    transition: border-color 0.15s, box-shadow 0.15s;
+}
+
+.signin-input::placeholder {
+    color: #c4c9d4;
+}
+
+.signin-input:focus {
+    border-color: #111827;
+    box-shadow: 0 0 0 3px rgba(17, 24, 39, 0.08);
+}
+
+/* ---------- Toggle Password ---------- */
+.signin-toggle-password {
+    position: absolute;
+    right: 0.75rem;
+    background: none;
+    border: none;
+    cursor: pointer;
+    color: #9ca3af;
+    display: flex;
+    align-items: center;
+    padding: 0;
+    line-height: 0;
+    transition: color 0.15s;
+}
+
+.signin-toggle-password:hover {
+    color: #374151;
+}
+
+/* ---------- Remember ---------- */
+.signin-remember {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+
+.signin-checkbox {
+    width: 15px;
+    height: 15px;
+    accent-color: #111827;
+    cursor: pointer;
+    border-radius: 4px;
+}
+
+.signin-remember-label {
+    font-size: 0.8125rem;
+    color: #6b7280;
+    cursor: pointer;
+}
+
+/* ---------- Submit Button ---------- */
+.signin-btn {
+    width: 100%;
+    padding: 0.7rem;
+    background-color: #111827;
+    color: #ffffff;
+    font-size: 0.875rem;
+    font-weight: 600;
+    border: none;
+    border-radius: 8px;
+    cursor: pointer;
+    letter-spacing: 0.01em;
+    transition: background-color 0.15s, opacity 0.15s;
+    margin-top: 0.25rem;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 40px;
+}
+
+.signin-btn:hover:not(:disabled) {
+    background-color: #1f2937;
+}
+
+.signin-btn:active:not(:disabled) {
+    background-color: #0f172a;
+}
+
+.signin-btn:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+}
+
+/* ---------- Spinner ---------- */
+.signin-spinner {
+    display: inline-block;
+    width: 16px;
+    height: 16px;
+    border: 2px solid rgba(255, 255, 255, 0.35);
+    border-top-color: #ffffff;
+    border-radius: 50%;
+    animation: spin 0.65s linear infinite;
+}
+
+@keyframes spin {
+    to {
+        transform: rotate(360deg);
+    }
+}
+
+/* ---------- Responsive ---------- */
+@media (max-width: 480px) {
+    .signin-card {
+        padding: 2rem 1.5rem 1.75rem;
+        border: none;
+        border-radius: 0;
+        min-height: 100vh;
+        display: flex;
+        flex-direction: column;
+        justify-content: center;
+    }
+
+    .signin-wrapper {
+        padding: 0;
+        background-color: #ffffff;
+    }
+}
