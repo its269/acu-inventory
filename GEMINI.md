@@ -10,19 +10,22 @@ A Next.js-based Human Resource Information System (HRIS) application focused on 
 - **Styling:** Vanilla CSS (Strictly avoid utility frameworks unless requested)
 - **Data Source:** Acumatica ERP via REST API
 
-## Architecture: Modern MVC
+## Architecture: Streaming BFF
 
-To ensure scalability and clean separation of concerns, the project follows an MVC-inspired pattern adapted for Next.js:
+To ensure performance with large Acumatica datasets, the project follows a streaming BFF (Backend-for-Frontend) pattern:
 
-1.  **Models (`src/lib/models` & `src/lib/services`):**
-    *   **Models:** Define data structures and validation schemas (e.g., Zod).
-    *   **Services:** Handle direct communication with Acumatica, data transformation, and business logic. This acts as the "Source of Truth".
-2.  **Views (`src/components` & `app/` layouts):**
-    *   Purely presentational React components.
-    *   Focus on UI/UX and accessibility.
-3.  **Controllers (`app/**/page.js` & `src/lib/actions`):**
-    *   **Pages:** Act as the entry-point controllers that orchestrate data fetching from Services and passing it to Components.
-    *   **Server Actions:** Handle mutations and user interactions that require server-side logic.
+1.  **API Layer (`app/api/`):**
+    *   Acts as the primary data orchestrator.
+    *   Handles authentication and session persistence with Acumatica.
+    *   Transforms raw Acumatica JSON into flattened, application-specific models.
+    *   Uses NDJSON streaming for high-volume endpoints (e.g., inventory).
+2.  **View Layer (`app/` pages & layouts):**
+    *   Uses Next.js App Router.
+    *   Consumes streaming APIs using `ReadableStream` and chunked processing in the browser.
+    *   Focuses on low-latency rendering and minimalist styling.
+3.  **Styles (`styles/`):**
+    *   Vanilla CSS modules and globals.
+    *   No utility frameworks.
 
 ## Building and Running
 

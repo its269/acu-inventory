@@ -412,30 +412,7 @@ export default function DashboardPage() {
     return (
         <div className="db-root">
 
-            {/* ── Top Nav ─────────────────────────────────── */}
-            <header className="db-nav">
-                <div className="db-nav-left">
-                    <div className="db-nav-brand">
-                        <IconBox />
-                        <span>Inventory CMS</span>
-                    </div>
-                </div>
-                <div className="db-nav-right">
-                    <div className="db-user-chip">
-                        <div className="db-user-avatar">{initials}</div>
-                        <span className="db-user-name">{userName}</span>
-                    </div>
-                    <button
-                        className="db-nav-logout"
-                        onClick={() => { localStorage.removeItem("userName"); localStorage.removeItem("userFirstName"); localStorage.removeItem("userLastName"); router.push("/signin"); }}
-                        title="Sign Out"
-                    >
-                        <IconLogout />
-                        <span>Sign Out</span>
-                    </button>
-                </div>
-            </header>
-
+            {/* ── Main Content ───────────────────────────── */}
             <main className="db-main">
 
                 {/* ── Welcome banner ───────────────────────── */}
@@ -494,12 +471,6 @@ export default function DashboardPage() {
                     </div>
 
                     <div className="db-toolbar-right">
-                        <button className="db-action-btn db-action-transfer" onClick={() => setShowTransfer(true)}>
-                            <IconTransfer /><span>Transfer Stock</span>
-                        </button>
-                        <button className="db-action-btn db-action-po" onClick={() => setShowPO(true)}>
-                            <IconPO /><span>Create PO</span>
-                        </button>
                         <button className="db-action-btn db-action-audit" onClick={() => setShowAudit(true)}>
                             <IconAudit />
                             <span>Audit Log</span>
