@@ -1,11 +1,15 @@
+import { getCachedInventoryPage, upsertInventoryRows } from "@/lib/inventory-cache";
+
 const ACU_BASE = "https://accounting.holocrontrackertrading.com/ERP/entity/Default/20.200.001";
+
+export const runtime = "nodejs";
 
 /* ── Flatten one StockItem into warehouse rows ────────── */
 function flattenItem(item, selectedBranch = "") {
     const wds = item.WarehouseDetails;
     if (Array.isArray(wds) && wds.length > 0) {
         let rows = wds.map((wh) => {
-            const whBranch = wh.Branch?.value || wh.WarehouseID?.value || "";
+            const siteId = wh.WarehouseID?.value || wh.WarehouseID?.Value || "";
             return {
                 InventoryID: item.InventoryID,
                 Description: item.Description,
@@ -15,7 +19,7 @@ function flattenItem(item, selectedBranch = "") {
                 AvailForShip: wh.QtyAvailableForShipment ?? wh.QtyAvailableforShipment ?? { value: 0 },
                 DefaultPrice: item.DefaultPrice,
                 ItemClass: item.ItemClass ?? item.ItemClassID,
-                Branch: wh.Branch ?? { value: whBranch },
+                Branch: { value: siteId },
             };
         });
 
@@ -34,7 +38,7 @@ function flattenItem(item, selectedBranch = "") {
         AvailForShip: { value: 0 },
         DefaultPrice: item.DefaultPrice,
         ItemClass: item.ItemClass ?? item.ItemClassID,
-        Branch: { value: "" },
+        Branch: item.DefaultWarehouseID ?? item.DefaultWarehouse ?? { value: "" },
     };
 
     if (selectedBranch && defaultRow.Branch.value.toLowerCase() !== selectedBranch.toLowerCase()) {
@@ -52,6 +56,7 @@ export async function GET(request) {
         const pageSize = parseInt(searchParams.get("pageSize") || "10");
         const search = searchParams.get("search") || "";
         const branch = searchParams.get("branch") || "";
+        const readFromCache = () => getCachedInventoryPage({ page, pageSize, search, branch });
 
         const skip = (page - 1) * pageSize;
 
@@ -90,7 +95,13 @@ export async function GET(request) {
             if (res2.ok) {
                 const data = await res2.json();
                 const rawItems = data.value || data.d?.results || (Array.isArray(data) ? data : (data.d || []));
-                return Response.json({ data: rawItems.flatMap(item => flattenItem(item, branch)), totalCount: 0, hasMore: rawItems.length >= pageSize, page, pageSize });
+                const rows = rawItems.flatMap(item => flattenItem(item, branch));
+                upsertInventoryRows(rows);
+                return Response.json({ data: rows, totalCount: 0, hasMore: rawItems.length >= pageSize, page, pageSize, source: "server" });
+            }
+            const cached = readFromCache();
+            if (cached.totalCount > 0 || cached.data.length > 0) {
+                return Response.json(cached);
             }
             return Response.json({ message: "Acumatica Error" }, { status: res.status });
         }
@@ -110,16 +121,35 @@ export async function GET(request) {
         // Logic for "totalCount" on Screen API: sometimes it's returned as a separate property if $inlinecount is used.
         // If it's STILL 0, we can't show "300", we must find why Acumatica isn't giving us the count.
 
+        const rows = rawItems.flatMap(item => flattenItem(item, branch));
+        upsertInventoryRows(rows);
+
         return Response.json({
-            data: rawItems.flatMap(item => flattenItem(item, branch)),
+            data: rows,
             totalCount: totalCount,
             hasMore: rawItems.length >= pageSize,
             page,
-            pageSize
+            pageSize,
+            source: "server"
         });
 
     } catch (err) {
         console.error("[inventory error]", err);
+        try {
+            const { searchParams } = new URL(request.url);
+            const cached = getCachedInventoryPage({
+                page: parseInt(searchParams.get("page") || "1"),
+                pageSize: parseInt(searchParams.get("pageSize") || "10"),
+                search: searchParams.get("search") || "",
+                branch: searchParams.get("branch") || "",
+            });
+            if (cached.totalCount > 0 || cached.data.length > 0) {
+                return Response.json(cached);
+            }
+        } catch (cacheErr) {
+            console.error("[inventory cache fallback error]", cacheErr);
+        }
+
         return Response.json({ message: "Internal server error" }, { status: 500 });
     }
 }
