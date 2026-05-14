@@ -32,7 +32,12 @@ const IconSales = () => (
 
 export default function Sidebar() {
   const pathname = usePathname();
+  const [mounted, setMounted] = useState(false);
   const [userName, setUserName] = useState("Admin User");
+
+  useEffect(() => {
+    setMounted(true);
+  }, []);
 
   useEffect(() => {
     // We use useEffect here because localStorage is only available on the client.
@@ -46,10 +51,10 @@ export default function Sidebar() {
   }, []);
 
   const navItems = [
-    { name: "Inventory", href: "/dashboard", icon: <IconInventory /> },
     { name: "Stock Items", href: "/stock-items", icon: <IconStock /> },
-    { name: "PO", href: "/po", icon: <IconPO /> },
-    { name: "Sales", href: "/sales", icon: <IconSales /> },
+    { name: "Inventory", href: "/dashboard", icon: <IconInventory /> },
+    { name: "Incoming PO", href: "/po", icon: <IconPO /> },
+    { name: "Last 3 Months Sales", href: "/sales", icon: <IconSales /> },
   ];
 
   return (
@@ -73,7 +78,7 @@ export default function Sidebar() {
           <Link
             key={item.name}
             href={item.href}
-            className={`sidebar-item ${pathname === item.href ? "active" : ""}`}
+            className={`sidebar-item ${mounted && pathname === item.href ? "active" : ""}`}
           >
             <span className="sidebar-item-icon">{item.icon}</span>
             {item.name}
@@ -82,7 +87,7 @@ export default function Sidebar() {
       </nav>
 
       <div className="sidebar-footer">
-        <button 
+        <button
           className="sidebar-logout"
           onClick={() => {
             localStorage.removeItem("userName");

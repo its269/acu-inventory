@@ -72,23 +72,22 @@ export async function GET(request) {
 
         const filterStr = filterParts.length > 0 ? `&$filter=${filterParts.join(" and ")}` : "";
 
-        // Attempting to get total count using all possible OData count parameters
-        const url = `${ACU_BASE}/StockItem?$expand=WarehouseDetails&$top=${pageSize}&$skip=${skip}${filterStr}&$inlinecount=allpages&$count=true`;
+        const url = `${ACU_BASE}/StockItem?$expand=WarehouseDetails&$top=${pageSize}&$skip=${skip}${filterStr}`;
+        // Lightweight count request: only fetch InventoryID (no expand), up to 10 000 items
+        const countUrl = `${ACU_BASE}/StockItem?$select=InventoryID&$top=10000${filterStr}`;
 
         console.log("[inventory] fetching:", url);
 
-        const res = await fetch(url, {
-            method: "GET",
-            headers: { "Content-Type": "application/json", Accept: "application/json", Cookie: cookie },
-        });
+        const [res, countRes] = await Promise.all([
+            fetch(url, { headers: { "Content-Type": "application/json", Accept: "application/json", Cookie: cookie } }),
+            fetch(countUrl, { headers: { Accept: "application/json", Cookie: cookie } }),
+        ]);
 
         if (res.status === 401) return Response.json({ message: "Unauthorized" }, { status: 401 });
 
         if (!res.ok) {
-            // Tiered fallback logic preserved
             console.log("[inventory] error, retrying without count...");
-            const fallbackUrl = url.replace("&$inlinecount=allpages", "").replace("&$count=true", "");
-            const res2 = await fetch(fallbackUrl, {
+            const res2 = await fetch(url, {
                 method: "GET",
                 headers: { "Content-Type": "application/json", Accept: "application/json", Cookie: cookie },
             });
@@ -109,17 +108,22 @@ export async function GET(request) {
         const data = await res.json();
         const rawItems = data.value || data.d?.results || (Array.isArray(data) ? data : (data.d || []));
 
-        // Extract total count from all possible OData metadata fields
-        let totalCount = parseInt(
-            data["odata.count"] ||
-            data["@odata.count"] ||
-            data["count"] ||
-            data.d?.__count ||
-            "0"
-        );
-
-        // Logic for "totalCount" on Screen API: sometimes it's returned as a separate property if $inlinecount is used.
-        // If it's STILL 0, we can't show "300", we must find why Acumatica isn't giving us the count.
+        // Derive total count from the lightweight parallel count request
+        let totalCount = 0;
+        if (countRes.ok) {
+            const countData = await countRes.json();
+            // Try OData wrapper first, then fall back to counting returned IDs
+            const fromMeta = parseInt(
+                countData["odata.count"] || countData["@odata.count"] ||
+                countData["count"] || countData.d?.__count || "0"
+            );
+            if (fromMeta > 0) {
+                totalCount = fromMeta;
+            } else {
+                const countItems = countData.value ?? (Array.isArray(countData) ? countData : []);
+                totalCount = countItems.length;
+            }
+        }
 
         const rows = rawItems.flatMap(item => flattenItem(item, branch));
         upsertInventoryRows(rows);

@@ -143,14 +143,9 @@ export default function SignInPage() {
                     </div>
 
                     <div className="signin-field">
-                        <div className="signin-label-row">
-                            <label className="signin-label" htmlFor="password">
-                                Password
-                            </label>
-                            <a href="#" className="signin-forgot">
-                                Forgot password?
-                            </a>
-                        </div>
+                        <label className="signin-label" htmlFor="password">
+                            Password
+                        </label>
                         <div className="signin-input-wrapper">
                             <span className="signin-input-icon"><IconLock /></span>
                             <input
