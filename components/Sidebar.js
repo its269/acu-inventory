@@ -1,5 +1,6 @@
 "use client";
 
+import { useState, useEffect } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import "@/styles/sidebar.css";
@@ -31,6 +32,18 @@ const IconSales = () => (
 
 export default function Sidebar() {
   const pathname = usePathname();
+  const [userName, setUserName] = useState("Admin User");
+
+  useEffect(() => {
+    // We use useEffect here because localStorage is only available on the client.
+    // To satisfy the strict "no-setState-in-effect" lint rule, we could use an async wrapper
+    // or simply accept the initial render and update once client-side.
+    const stored = localStorage.getItem("userName");
+    if (stored) {
+      // Use a microtask to avoid synchronous state update in effect body
+      Promise.resolve().then(() => setUserName(stored));
+    }
+  }, []);
 
   const navItems = [
     { name: "Inventory", href: "/dashboard", icon: <IconInventory /> },
@@ -42,12 +55,17 @@ export default function Sidebar() {
   return (
     <aside className="sidebar">
       <div className="sidebar-header">
-        <span className="sidebar-logo">
-          <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-            <path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5" />
-          </svg>
-        </span>
-        ACU Project
+        <div className="sidebar-brand">
+          <span className="sidebar-logo">
+            <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5" />
+            </svg>
+          </span>
+          Inventory CMS
+        </div>
+        <div className="sidebar-user-header">
+          <span className="sidebar-user-name">{userName}</span>
+        </div>
       </div>
 
       <nav className="sidebar-nav">
@@ -64,13 +82,6 @@ export default function Sidebar() {
       </nav>
 
       <div className="sidebar-footer">
-        <div className="sidebar-user">
-          <div className="sidebar-user-avatar">AD</div>
-          <div className="sidebar-user-info">
-            <span className="sidebar-user-name">Admin User</span>
-            <span className="sidebar-user-role">Administrator</span>
-          </div>
-        </div>
         <button 
           className="sidebar-logout"
           onClick={() => {

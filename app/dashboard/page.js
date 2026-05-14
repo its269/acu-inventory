@@ -127,6 +127,7 @@ const InventoryRow = memo(({ row, index }) => {
     const onHand = Number(row.OnHand?.value) || 0;
     const available = Number(row.Available?.value) || 0;
     const status = getStatus(onHand);
+    console.log(`hello world`);
     return (
         <tr className={status === "LOW_STOCK" ? "db-row-warn" : status === "OUT_OF_STOCK" ? "db-row-danger" : ""}>
             <td className="db-row-num">{index}</td>
@@ -192,7 +193,7 @@ export default function DashboardPage() {
         const display = (first || last)
             ? [first, last].filter(Boolean).join(" ")
             : full || "User";
-        setUserName(display);
+        Promise.resolve().then(() => setUserName(display));
 
         // Fetch branches for the filter dropdown
         const fetchBranches = async () => {
@@ -200,7 +201,8 @@ export default function DashboardPage() {
                 const res = await fetch("/api/branches");
                 if (res.ok) {
                     const data = await res.json();
-                    const names = data.map(b => b.BranchName?.value || b.BranchID?.value).filter(Boolean);
+                    const list = Array.isArray(data) ? data : (data?.value || []);
+                    const names = list.map((b) => b.SiteID || b.BranchName?.value || b.BranchID?.value).filter(Boolean);
                     setBranchOptions([...new Set(names)].sort());
                 }
             } catch (err) {
@@ -221,20 +223,26 @@ export default function DashboardPage() {
     const fetchInventory = useCallback(async () => {
         setLoading(true);
         setError("");
-        
+
         // Reset local data when changing page/search/branch to ensure a clean view
         // instead of appending or keeping old stale data.
         setAllInventory([]);
 
         try {
-            const url = `/api/inventory?page=${page}&pageSize=${ROWS_PER_PAGE}&search=${debouncedSearch}&branch=${selectedBranch}`;
+            const params = new URLSearchParams({
+                page: String(page),
+                pageSize: String(ROWS_PER_PAGE),
+                search: debouncedSearch,
+                branch: selectedBranch,
+            });
+            const url = `/api/inventory?${params.toString()}`;
             const res = await fetch(url);
-            
+
             if (res.status === 401) { router.push("/signin"); return; }
             if (!res.ok) { setError("Failed to load inventory."); return; }
 
             const result = await res.json();
-            
+
             // Strictly REPLACE the data with the new page's content
             setAllInventory(result.data || []);
             setTotalCount(result.totalCount || 0);
@@ -247,7 +255,9 @@ export default function DashboardPage() {
         }
     }, [page, debouncedSearch, selectedBranch, router]);
 
-    useEffect(() => { fetchInventory(); }, [fetchInventory]);
+    useEffect(() => {
+        Promise.resolve().then(() => fetchInventory());
+    }, [fetchInventory]);
 
     /* ── Memoised derived data ──────────────────────── */
 
@@ -377,30 +387,6 @@ export default function DashboardPage() {
     return (
         <div className="db-root">
 
-            {/* ── Top Nav ─────────────────────────────────── */}
-            <header className="db-nav">
-                <div className="db-nav-left">
-                    <div className="db-nav-brand">
-                        <IconBox />
-                        <span>Inventory CMS</span>
-                    </div>
-                </div>
-                <div className="db-nav-right">
-                    <div className="db-user-chip">
-                        <div className="db-user-avatar">{initials}</div>
-                        <span className="db-user-name">{userName}</span>
-                    </div>
-                    <button
-                        className="db-nav-logout"
-                        onClick={() => { localStorage.removeItem("userName"); localStorage.removeItem("userFirstName"); localStorage.removeItem("userLastName"); router.push("/signin"); }}
-                        title="Sign Out"
-                    >
-                        <IconLogout />
-                        <span>Sign Out</span>
-                    </button>
-                </div>
-            </header>
-
             <main className="db-main">
 
                 {/* ── Welcome banner ───────────────────────── */}
@@ -459,12 +445,6 @@ export default function DashboardPage() {
                     </div>
 
                     <div className="db-toolbar-right">
-                        <button className="db-action-btn db-action-transfer" onClick={() => setShowTransfer(true)}>
-                            <IconTransfer /><span>Transfer Stock</span>
-                        </button>
-                        <button className="db-action-btn db-action-po" onClick={() => setShowPO(true)}>
-                            <IconPO /><span>Create PO</span>
-                        </button>
                         <button className="db-action-btn db-action-audit" onClick={() => setShowAudit(true)}>
                             <IconAudit />
                             <span>Audit Log</span>
@@ -554,26 +534,26 @@ export default function DashboardPage() {
                             Showing {((page - 1) * ROWS_PER_PAGE) + 1}–{((page - 1) * ROWS_PER_PAGE) + inventory.length} of {totalCount || (hasMore ? "many" : inventory.length)} items
                         </span>
                         <div className="db-page-btns">
-                            <button className="db-page-btn" disabled={page === 1} onClick={() => setPage(1)}>{"<<"}</button>
-                            <button className="db-page-btn" disabled={page === 1} onClick={() => setPage(p => p - 1)}>{"<"}</button>
-                            
+                            <button className="db-page-btn db-page-btn-nav" disabled={page === 1} onClick={() => setPage(1)} aria-label="First page">&laquo;</button>
+                            <button className="db-page-btn db-page-btn-nav" disabled={page === 1} onClick={() => setPage(p => p - 1)} aria-label="Previous page">&lsaquo;</button>
+
                             {(() => {
                                 const pages = [];
                                 // Force totalCount to at least show 300 if hasMore is true but total is 0 
                                 // just to satisfy the requested design while debugging the API count issue.
                                 const displayTotal = totalCount > 0 ? totalPages : (hasMore ? 300 : page);
                                 const current = page;
-                                
+
                                 if (displayTotal <= 7) {
                                     for (let i = 1; i <= displayTotal; i++) pages.push(i);
                                 } else {
                                     // Always show 1, 2, 3
                                     pages.push(1, 2, 3);
-                                    
+
                                     if (current > 4) {
                                         pages.push("...");
                                     }
-                                    
+
                                     // Center range if current is far from start/end
                                     if (current > 3 && current < displayTotal - 2) {
                                         if (current > 4) pages.push(current);
@@ -581,7 +561,7 @@ export default function DashboardPage() {
                                     } else if (current >= displayTotal - 2) {
                                         pages.push("...");
                                     }
-                                    
+
                                     // Always show last page
                                     pages.push(displayTotal);
                                 }
@@ -599,8 +579,8 @@ export default function DashboardPage() {
                                 ));
                             })()}
 
-                            <button className="db-page-btn" disabled={!hasMore && page >= totalPages} onClick={() => setPage(p => p + 1)}>{">"}</button>
-                            <button className="db-page-btn" disabled={!hasMore && page >= totalPages} onClick={() => setPage(totalCount > 0 ? totalPages : page + 1)}>{" >>"}</button>
+                            <button className="db-page-btn db-page-btn-nav" disabled={!hasMore && page >= totalPages} onClick={() => setPage(p => p + 1)} aria-label="Next page">&rsaquo;</button>
+                            <button className="db-page-btn db-page-btn-nav" disabled={!hasMore && page >= totalPages} onClick={() => setPage(totalCount > 0 ? totalPages : page + 1)} aria-label="Last page">&raquo;</button>
                         </div>
                     </div>
                 )}

@@ -18,13 +18,13 @@ function flattenItem(item, selectedBranch = "") {
                 Branch: wh.Branch ?? { value: whBranch },
             };
         });
-        
+
         if (selectedBranch) {
             rows = rows.filter(r => (r.Branch?.value || "").toLowerCase() === selectedBranch.toLowerCase());
         }
         return rows;
     }
-    
+
     const defaultRow = {
         InventoryID: item.InventoryID,
         Description: item.Description,
@@ -47,24 +47,24 @@ export async function GET(request) {
     try {
         const cookie = request.headers.get("cookie") || "";
         const { searchParams } = new URL(request.url);
-        
+
         const page = parseInt(searchParams.get("page") || "1");
         const pageSize = parseInt(searchParams.get("pageSize") || "10");
         const search = searchParams.get("search") || "";
         const branch = searchParams.get("branch") || "";
-        
+
         const skip = (page - 1) * pageSize;
 
         let filterParts = [];
         if (search) {
             const s = search.replace(/'/g, "''");
-            filterParts.push(`(substringof('${s}', InventoryID/value) or substringof('${s}', Description/value))`);
+            filterParts.push(`(substringof('${s}', InventoryID/Value) or substringof('${s}', Description/Value))`);
         }
         if (branch) {
             const b = branch.replace(/'/g, "''");
-            filterParts.push(`WarehouseDetails/any(w: w/Branch/value eq '${b}')`);
+            filterParts.push(`DefaultWarehouseID/Value eq '${b}'`);
         }
-        
+
         const filterStr = filterParts.length > 0 ? `&$filter=${filterParts.join(" and ")}` : "";
 
         // Attempting to get total count using all possible OData count parameters
@@ -78,7 +78,7 @@ export async function GET(request) {
         });
 
         if (res.status === 401) return Response.json({ message: "Unauthorized" }, { status: 401 });
-        
+
         if (!res.ok) {
             // Tiered fallback logic preserved
             console.log("[inventory] error, retrying without count...");
@@ -97,19 +97,19 @@ export async function GET(request) {
 
         const data = await res.json();
         const rawItems = data.value || data.d?.results || (Array.isArray(data) ? data : (data.d || []));
-        
+
         // Extract total count from all possible OData metadata fields
         let totalCount = parseInt(
-            data["odata.count"] || 
-            data["@odata.count"] || 
-            data["count"] || 
-            data.d?.__count || 
+            data["odata.count"] ||
+            data["@odata.count"] ||
+            data["count"] ||
+            data.d?.__count ||
             "0"
         );
 
         // Logic for "totalCount" on Screen API: sometimes it's returned as a separate property if $inlinecount is used.
         // If it's STILL 0, we can't show "300", we must find why Acumatica isn't giving us the count.
-        
+
         return Response.json({
             data: rawItems.flatMap(item => flattenItem(item, branch)),
             totalCount: totalCount,
