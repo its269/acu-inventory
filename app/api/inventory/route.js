@@ -1,12 +1,10 @@
-﻿const ACU_BASE = "https://accounting.holocrontrackertrading.com/ERP/entity/Default/20.200.001";
-const PAGE_SIZE = 500;
-const CONCURRENCY = 4; // parallel requests in flight at once
+const ACU_BASE = "https://accounting.holocrontrackertrading.com/ERP/entity/Default/20.200.001";
 
 /* ── Flatten one StockItem into warehouse rows ────────── */
-function flattenItem(item) {
+function flattenItem(item, selectedBranch = "") {
     const wds = item.WarehouseDetails;
     if (Array.isArray(wds) && wds.length > 0) {
-        return wds.map((wh) => {
+        let rows = wds.map((wh) => {
             const whBranch = wh.Branch?.value || wh.WarehouseID?.value || "";
             return {
                 InventoryID: item.InventoryID,
@@ -20,8 +18,14 @@ function flattenItem(item) {
                 Branch: wh.Branch ?? { value: whBranch },
             };
         });
+        
+        if (selectedBranch) {
+            rows = rows.filter(r => (r.Branch?.value || "").toLowerCase() === selectedBranch.toLowerCase());
+        }
+        return rows;
     }
-    return [{
+    
+    const defaultRow = {
         InventoryID: item.InventoryID,
         Description: item.Description,
         SiteID: item.DefaultWarehouse ?? item.DefaultWarehouseID ?? { value: "" },
@@ -31,126 +35,91 @@ function flattenItem(item) {
         DefaultPrice: item.DefaultPrice,
         ItemClass: item.ItemClass ?? item.ItemClassID,
         Branch: { value: "" },
-    }];
-}
+    };
 
-/* ── Fetch one page from Acumatica ────────────────────── */
-async function fetchPage(skip, cookie) {
-    const url = `${ACU_BASE}/StockItem?$expand=WarehouseDetails&$top=${PAGE_SIZE}&$skip=${skip}`;
-    const res = await fetch(url, {
-        method: "GET",
-        headers: {
-            "Content-Type": "application/json",
-            Accept: "application/json",
-            Cookie: cookie,
-        },
-    });
-    if (res.status === 401) return { status: 401, data: null };
-    if (!res.ok) {
-        const text = await res.text().catch(() => "");
-        return { status: res.status, data: null, error: text };
+    if (selectedBranch && defaultRow.Branch.value.toLowerCase() !== selectedBranch.toLowerCase()) {
+        return [];
     }
-    const data = await res.json();
-    return { status: 200, data: Array.isArray(data) ? data : [] };
+    return [defaultRow];
 }
 
 export async function GET(request) {
-    const cookie = request.headers.get("cookie") || "";
+    try {
+        const cookie = request.headers.get("cookie") || "";
+        const { searchParams } = new URL(request.url);
+        
+        const page = parseInt(searchParams.get("page") || "1");
+        const pageSize = parseInt(searchParams.get("pageSize") || "10");
+        const search = searchParams.get("search") || "";
+        const branch = searchParams.get("branch") || "";
+        
+        const skip = (page - 1) * pageSize;
 
-    /* ── Streaming response ─────────────────────────────────
-       Sends NDJSON (one JSON row per line) so the dashboard
-       can start rendering rows immediately instead of waiting
-       for the full dataset to load.
-    ─────────────────────────────────────────────────────── */
-    const encoder = new TextEncoder();
+        let filterParts = [];
+        if (search) {
+            const s = search.replace(/'/g, "''");
+            filterParts.push(`(substringof('${s}', InventoryID/value) or substringof('${s}', Description/value))`);
+        }
+        if (branch) {
+            const b = branch.replace(/'/g, "''");
+            filterParts.push(`WarehouseDetails/any(w: w/Branch/value eq '${b}')`);
+        }
+        
+        const filterStr = filterParts.length > 0 ? `&$filter=${filterParts.join(" and ")}` : "";
 
-    const stream = new ReadableStream({
-        async start(controller) {
-            try {
-                // Fetch page 0 first to check if there's more data
-                const first = await fetchPage(0, cookie);
+        // Attempting to get total count using all possible OData count parameters
+        const url = `${ACU_BASE}/StockItem?$expand=WarehouseDetails&$top=${pageSize}&$skip=${skip}${filterStr}&$inlinecount=allpages&$count=true`;
 
-                if (first.status === 401) {
-                    controller.enqueue(encoder.encode(JSON.stringify({ __error: 401 }) + "\n"));
-                    controller.close();
-                    return;
-                }
-                if (first.status !== 200) {
-                    controller.enqueue(encoder.encode(JSON.stringify({ __error: first.status, message: first.error }) + "\n"));
-                    controller.close();
-                    return;
-                }
+        console.log("[inventory] fetching:", url);
 
-                // Stream first page rows immediately — user sees data right away
-                for (const item of first.data) {
-                    for (const row of flattenItem(item)) {
-                        controller.enqueue(encoder.encode(JSON.stringify(row) + "\n"));
-                    }
-                }
+        const res = await fetch(url, {
+            method: "GET",
+            headers: { "Content-Type": "application/json", Accept: "application/json", Cookie: cookie },
+        });
 
-                // If first page wasn't full, we're done
-                if (first.data.length < PAGE_SIZE) {
-                    controller.close();
-                    return;
-                }
-
-                // Otherwise fetch remaining pages in parallel batches
-                let skip = PAGE_SIZE;
-                let done = false;
-
-                while (!done) {
-                    // Fire CONCURRENCY pages at once
-                    const batch = [];
-                    for (let i = 0; i < CONCURRENCY; i++) {
-                        batch.push(fetchPage(skip + i * PAGE_SIZE, cookie));
-                    }
-
-                    const results = await Promise.all(batch);
-
-                    for (const result of results) {
-                        if (result.status === 401) {
-                            controller.enqueue(encoder.encode(JSON.stringify({ __error: 401 }) + "\n"));
-                            controller.close();
-                            return;
-                        }
-                        if (result.status !== 200 || !result.data) {
-                            done = true;
-                            break;
-                        }
-
-                        for (const item of result.data) {
-                            for (const row of flattenItem(item)) {
-                                controller.enqueue(encoder.encode(JSON.stringify(row) + "\n"));
-                            }
-                        }
-
-                        // If any page in the batch returned less than full, we're done
-                        if (result.data.length < PAGE_SIZE) {
-                            done = true;
-                            break;
-                        }
-                    }
-
-                    skip += CONCURRENCY * PAGE_SIZE;
-                }
-
-                controller.close();
-            } catch (err) {
-                console.error("[inventory stream error]", err);
-                controller.enqueue(encoder.encode(JSON.stringify({ __error: 502, message: "Unable to reach Acumatica." }) + "\n"));
-                controller.close();
+        if (res.status === 401) return Response.json({ message: "Unauthorized" }, { status: 401 });
+        
+        if (!res.ok) {
+            // Tiered fallback logic preserved
+            console.log("[inventory] error, retrying without count...");
+            const fallbackUrl = url.replace("&$inlinecount=allpages", "").replace("&$count=true", "");
+            const res2 = await fetch(fallbackUrl, {
+                method: "GET",
+                headers: { "Content-Type": "application/json", Accept: "application/json", Cookie: cookie },
+            });
+            if (res2.ok) {
+                const data = await res2.json();
+                const rawItems = data.value || data.d?.results || (Array.isArray(data) ? data : (data.d || []));
+                return Response.json({ data: rawItems.flatMap(item => flattenItem(item, branch)), totalCount: 0, hasMore: rawItems.length >= pageSize, page, pageSize });
             }
-        },
-    });
+            return Response.json({ message: "Acumatica Error" }, { status: res.status });
+        }
 
-    return new Response(stream, {
-        status: 200,
-        headers: {
-            "Content-Type": "application/x-ndjson",
-            "Transfer-Encoding": "chunked",
-            "Cache-Control": "no-store",
-            "X-Accel-Buffering": "no", // Disable Nginx buffering so chunks flow immediately
-        },
-    });
+        const data = await res.json();
+        const rawItems = data.value || data.d?.results || (Array.isArray(data) ? data : (data.d || []));
+        
+        // Extract total count from all possible OData metadata fields
+        let totalCount = parseInt(
+            data["odata.count"] || 
+            data["@odata.count"] || 
+            data["count"] || 
+            data.d?.__count || 
+            "0"
+        );
+
+        // Logic for "totalCount" on Screen API: sometimes it's returned as a separate property if $inlinecount is used.
+        // If it's STILL 0, we can't show "300", we must find why Acumatica isn't giving us the count.
+        
+        return Response.json({
+            data: rawItems.flatMap(item => flattenItem(item, branch)),
+            totalCount: totalCount,
+            hasMore: rawItems.length >= pageSize,
+            page,
+            pageSize
+        });
+
+    } catch (err) {
+        console.error("[inventory error]", err);
+        return Response.json({ message: "Internal server error" }, { status: 500 });
+    }
 }
-

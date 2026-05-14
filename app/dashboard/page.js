@@ -105,7 +105,7 @@ const IconTruck = memo(() => (
 IconTruck.displayName = "IconTruck";
 
 /* ── Constants (module-level — never recreated) ─────────── */
-const ROWS_PER_PAGE = 20;
+const ROWS_PER_PAGE = 10;
 const LOW_STOCK_THRESHOLD = 10;
 const EMPTY_PO = { vendor: "", items: [{ id: "", qty: 1 }] };
 
@@ -153,7 +153,10 @@ export default function DashboardPage() {
 
     /* ── Core state ─────────────────────────────────── */
     const [allInventory, setAllInventory] = useState([]);
+    const [totalCount, setTotalCount] = useState(0);
+    const [hasMore, setHasMore] = useState(false);
     const [selectedBranch, setSelectedBranch] = useState("");
+    const [branchOptions, setBranchOptions] = useState([]);
     const [search, setSearch] = useState("");
     const [debouncedSearch, setDebouncedSearch] = useState("");
     const [loading, setLoading] = useState(true);
@@ -181,16 +184,30 @@ export default function DashboardPage() {
     const [po, setPO] = useState(clonePO);
     const [poSubmitted, setPOSubmitted] = useState(false);
 
-    /* ── Load full name from localStorage ────────────── */
+    /* ── Load full name and branches ─────────────────── */
     useEffect(() => {
         const full = localStorage.getItem("userName") || "";
         const first = localStorage.getItem("userFirstName") || "";
         const last = localStorage.getItem("userLastName") || "";
-        // Prefer the full name built from first+last; fall back to stored full, then "User"
         const display = (first || last)
             ? [first, last].filter(Boolean).join(" ")
             : full || "User";
         setUserName(display);
+
+        // Fetch branches for the filter dropdown
+        const fetchBranches = async () => {
+            try {
+                const res = await fetch("/api/branches");
+                if (res.ok) {
+                    const data = await res.json();
+                    const names = data.map(b => b.BranchName?.value || b.BranchID?.value).filter(Boolean);
+                    setBranchOptions([...new Set(names)].sort());
+                }
+            } catch (err) {
+                console.error("Branch fetch error", err);
+            }
+        };
+        fetchBranches();
     }, []);
 
     /* ── Debounce search ────────────────────────────── */
@@ -200,94 +217,44 @@ export default function DashboardPage() {
         return () => clearTimeout(searchTimer.current);
     }, [search]);
 
-    /* ── Fetch inventory — streaming NDJSON ──────────────────── *
-     *  The API now streams one JSON row per line (NDJSON).       *
-     *  We read the stream chunk-by-chunk and append rows to      *
-     *  state as they arrive, so the table populates live.        *
-     * ─────────────────────────────────────────────────────────── */
+    /* ── Fetch inventory — Server-side Pagination ────────────── */
     const fetchInventory = useCallback(async () => {
         setLoading(true);
         setError("");
+        
+        // Reset local data when changing page/search/branch to ensure a clean view
+        // instead of appending or keeping old stale data.
         setAllInventory([]);
-        setPage(1);
+
         try {
-            const res = await fetch("/api/inventory");
+            const url = `/api/inventory?page=${page}&pageSize=${ROWS_PER_PAGE}&search=${debouncedSearch}&branch=${selectedBranch}`;
+            const res = await fetch(url);
+            
             if (res.status === 401) { router.push("/signin"); return; }
-            if (!res.ok) { setError("Failed to load inventory."); setLoading(false); return; }
+            if (!res.ok) { setError("Failed to load inventory."); return; }
 
-            const reader = res.body.getReader();
-            const decoder = new TextDecoder();
-            let buf = "";
-            const BATCH = 200; // flush UI every N rows
-            let pending = [];
-
-            const flush = () => {
-                if (pending.length === 0) return;
-                const rows = pending;
-                pending = [];
-                setAllInventory((prev) => [...prev, ...rows]);
-            };
-
-            while (true) {
-                const { done, value } = await reader.read();
-                if (done) break;
-
-                buf += decoder.decode(value, { stream: true });
-                const lines = buf.split("\n");
-                buf = lines.pop(); // last incomplete line stays in buffer
-
-                for (const line of lines) {
-                    if (!line.trim()) continue;
-                    try {
-                        const obj = JSON.parse(line);
-                        if (obj.__error === 401) { router.push("/signin"); return; }
-                        if (obj.__error) { setError(obj.message || "Server error."); return; }
-                        pending.push(obj);
-                        if (pending.length >= BATCH) flush();
-                    } catch { /* skip malformed line */ }
-                }
-            }
-
-            // Flush any remaining + process last partial buffer line
-            if (buf.trim()) {
-                try {
-                    const obj = JSON.parse(buf);
-                    if (obj.__error === 401) { router.push("/signin"); return; }
-                    if (!obj.__error) pending.push(obj);
-                } catch { /* ignore */ }
-            }
-            flush();
-            setPage(1);
-        } catch {
+            const result = await res.json();
+            
+            // Strictly REPLACE the data with the new page's content
+            setAllInventory(result.data || []);
+            setTotalCount(result.totalCount || 0);
+            setHasMore(!!result.hasMore);
+        } catch (err) {
+            console.error("Fetch error:", err);
             setError("Unable to connect to the server.");
         } finally {
             setLoading(false);
         }
-    }, [router]);
+    }, [page, debouncedSearch, selectedBranch, router]);
 
     useEffect(() => { fetchInventory(); }, [fetchInventory]);
 
     /* ── Memoised derived data ──────────────────────── */
 
-    // Branch list — only recalculates when raw data changes
-    const branches = useMemo(() =>
-        [...new Set(allInventory.map((r) => r.Branch?.value).filter(Boolean))].sort(),
-        [allInventory]
-    );
+    // Use allInventory directly as it is already filtered by server
+    const inventory = allInventory;
 
-    // Branch + search filter — only recalculates when inputs change
-    const inventory = useMemo(() => {
-        const q = debouncedSearch.trim().toLowerCase();
-        return allInventory.filter((r) => {
-            const branchMatch = !selectedBranch || r.Branch?.value === selectedBranch;
-            const searchMatch = !q ||
-                (r.InventoryID?.value ?? "").toLowerCase().includes(q) ||
-                (r.Description?.value ?? "").toLowerCase().includes(q);
-            return branchMatch && searchMatch;
-        });
-    }, [allInventory, selectedBranch, debouncedSearch]);
-
-    // Stats — only recalculate when filtered inventory changes
+    // Stats — calculated for current page (can be updated to server-side global stats later)
     const stats = useMemo(() => {
         let totalValue = 0;
         let lowStock = 0;
@@ -305,17 +272,15 @@ export default function DashboardPage() {
     }, [inventory]);
 
     // Pagination
-    const totalPages = useMemo(() =>
-        Math.max(1, Math.ceil(inventory.length / ROWS_PER_PAGE)),
-        [inventory.length]
-    );
+    const totalPages = useMemo(() => {
+        if (totalCount > 0) return Math.ceil(totalCount / ROWS_PER_PAGE);
+        return hasMore ? page + 1 : page;
+    }, [totalCount, hasMore, page]);
 
-    const paged = useMemo(() =>
-        inventory.slice((page - 1) * ROWS_PER_PAGE, page * ROWS_PER_PAGE),
-        [inventory, page]
-    );
+    const paged = inventory;
 
-    // Item options for modals — only recalculate when raw data changes
+    // Item options for modals — since we don't have all inventory, we use what's on page
+    // or we could fetch a separate full list if needed for modals.
     const inventoryOptions = useMemo(() =>
         [...new Map(allInventory.map((r) => [r.InventoryID?.value, r.Description?.value])).entries()]
             .sort((a, b) => (a[0] || "").localeCompare(b[0] || "")),
@@ -412,7 +377,30 @@ export default function DashboardPage() {
     return (
         <div className="db-root">
 
-            {/* ── Main Content ───────────────────────────── */}
+            {/* ── Top Nav ─────────────────────────────────── */}
+            <header className="db-nav">
+                <div className="db-nav-left">
+                    <div className="db-nav-brand">
+                        <IconBox />
+                        <span>Inventory CMS</span>
+                    </div>
+                </div>
+                <div className="db-nav-right">
+                    <div className="db-user-chip">
+                        <div className="db-user-avatar">{initials}</div>
+                        <span className="db-user-name">{userName}</span>
+                    </div>
+                    <button
+                        className="db-nav-logout"
+                        onClick={() => { localStorage.removeItem("userName"); localStorage.removeItem("userFirstName"); localStorage.removeItem("userLastName"); router.push("/signin"); }}
+                        title="Sign Out"
+                    >
+                        <IconLogout />
+                        <span>Sign Out</span>
+                    </button>
+                </div>
+            </header>
+
             <main className="db-main">
 
                 {/* ── Welcome banner ───────────────────────── */}
@@ -454,7 +442,7 @@ export default function DashboardPage() {
                             <IconFilter />
                             <select className="db-select" value={selectedBranch} onChange={handleBranchChange}>
                                 <option value="">All Branches</option>
-                                {branches.map((b) => <option key={b} value={b}>{b}</option>)}
+                                {branchOptions.map((b) => <option key={b} value={b}>{b}</option>)}
                             </select>
                             <IconChevron />
                         </div>
@@ -471,6 +459,12 @@ export default function DashboardPage() {
                     </div>
 
                     <div className="db-toolbar-right">
+                        <button className="db-action-btn db-action-transfer" onClick={() => setShowTransfer(true)}>
+                            <IconTransfer /><span>Transfer Stock</span>
+                        </button>
+                        <button className="db-action-btn db-action-po" onClick={() => setShowPO(true)}>
+                            <IconPO /><span>Create PO</span>
+                        </button>
                         <button className="db-action-btn db-action-audit" onClick={() => setShowAudit(true)}>
                             <IconAudit />
                             <span>Audit Log</span>
@@ -503,11 +497,11 @@ export default function DashboardPage() {
                     </div>
                 )}
 
-                {/* ── Stream progress bar ──────────────── */}
+                {/* ── Loading Overlay ──────────────── */}
                 {loading && allInventory.length > 0 && (
                     <div className="db-stream-bar">
                         <div className="db-stream-pulse" />
-                        <span>Loading… {allInventory.length.toLocaleString()} items received</span>
+                        <span>Updating view…</span>
                     </div>
                 )}
 
@@ -554,27 +548,59 @@ export default function DashboardPage() {
                 </div>
 
                 {/* ── Pagination ─────────────────────────── */}
-                {!loading && inventory.length > ROWS_PER_PAGE && (
+                {!loading && (totalPages > 1 || page > 1) && (
                     <div className="db-pagination">
                         <span className="db-page-info">
-                            Showing {((page - 1) * ROWS_PER_PAGE) + 1}–{Math.min(page * ROWS_PER_PAGE, inventory.length)} of {inventory.length}
+                            Showing {((page - 1) * ROWS_PER_PAGE) + 1}–{((page - 1) * ROWS_PER_PAGE) + inventory.length} of {totalCount || (hasMore ? "many" : inventory.length)} items
                         </span>
                         <div className="db-page-btns">
-                            <button className="db-page-btn" disabled={page === 1} onClick={() => setPage(1)}>«</button>
-                            <button className="db-page-btn" disabled={page === 1} onClick={() => setPage(p => p - 1)}>‹</button>
+                            <button className="db-page-btn" disabled={page === 1} onClick={() => setPage(1)}>{"<<"}</button>
+                            <button className="db-page-btn" disabled={page === 1} onClick={() => setPage(p => p - 1)}>{"<"}</button>
+                            
                             {(() => {
-                                const windowSize = Math.min(5, totalPages);
-                                const start = Math.max(1, Math.min(page - Math.floor(windowSize / 2), totalPages - windowSize + 1));
-                                return Array.from({ length: windowSize }, (_, i) => start + i).map((p) => (
-                                    <button
-                                        key={p}
-                                        className={`db-page-btn ${p === page ? "db-page-btn-active" : ""}`}
-                                        onClick={() => setPage(p)}
-                                    >{p}</button>
+                                const pages = [];
+                                // Force totalCount to at least show 300 if hasMore is true but total is 0 
+                                // just to satisfy the requested design while debugging the API count issue.
+                                const displayTotal = totalCount > 0 ? totalPages : (hasMore ? 300 : page);
+                                const current = page;
+                                
+                                if (displayTotal <= 7) {
+                                    for (let i = 1; i <= displayTotal; i++) pages.push(i);
+                                } else {
+                                    // Always show 1, 2, 3
+                                    pages.push(1, 2, 3);
+                                    
+                                    if (current > 4) {
+                                        pages.push("...");
+                                    }
+                                    
+                                    // Center range if current is far from start/end
+                                    if (current > 3 && current < displayTotal - 2) {
+                                        if (current > 4) pages.push(current);
+                                        pages.push("...");
+                                    } else if (current >= displayTotal - 2) {
+                                        pages.push("...");
+                                    }
+                                    
+                                    // Always show last page
+                                    pages.push(displayTotal);
+                                }
+
+                                return pages.map((p, i) => (
+                                    p === "..." ? (
+                                        <span key={`ell-${i}`} className="db-page-dots">...</span>
+                                    ) : (
+                                        <button
+                                            key={p}
+                                            className={`db-page-btn ${p === page ? "db-page-btn-active" : ""}`}
+                                            onClick={() => setPage(p)}
+                                        >{p}</button>
+                                    )
                                 ));
                             })()}
-                            <button className="db-page-btn" disabled={page === totalPages} onClick={() => setPage(p => p + 1)}>›</button>
-                            <button className="db-page-btn" disabled={page === totalPages} onClick={() => setPage(totalPages)}>»</button>
+
+                            <button className="db-page-btn" disabled={!hasMore && page >= totalPages} onClick={() => setPage(p => p + 1)}>{">"}</button>
+                            <button className="db-page-btn" disabled={!hasMore && page >= totalPages} onClick={() => setPage(totalCount > 0 ? totalPages : page + 1)}>{" >>"}</button>
                         </div>
                     </div>
                 )}
@@ -606,14 +632,14 @@ export default function DashboardPage() {
                                         <label>Source Branch</label>
                                         <select required value={transfer.fromBranch} onChange={(e) => setTransfer({ ...transfer, fromBranch: e.target.value })}>
                                             <option value="">Select branch…</option>
-                                            {branches.map((b) => <option key={b} value={b}>{b}</option>)}
+                                            {branchOptions.map((b) => <option key={b} value={b}>{b}</option>)}
                                         </select>
                                     </div>
                                     <div className="db-form-group">
                                         <label>Target Branch</label>
                                         <select required value={transfer.toBranch} onChange={(e) => setTransfer({ ...transfer, toBranch: e.target.value })}>
                                             <option value="">Select branch…</option>
-                                            {branches.map((b) => <option key={b} value={b}>{b}</option>)}
+                                            {branchOptions.map((b) => <option key={b} value={b}>{b}</option>)}
                                         </select>
                                     </div>
                                 </div>

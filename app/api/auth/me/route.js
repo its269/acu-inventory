@@ -1,3 +1,5 @@
+import { NextResponse } from "next/server";
+
 const ACU_BASE = "https://accounting.holocrontrackertrading.com/ERP/entity/Default/20.200.001";
 
 export async function GET(request) {
@@ -21,7 +23,7 @@ export async function GET(request) {
 
         if (!res.ok) {
             console.warn("[auth/me] Users fetch failed:", res.status, await res.text().catch(() => ""));
-            return Response.json({ fullName: username }, { status: 200 });
+            return NextResponse.json({ fullName: username }, { status: 200 });
         }
 
         const data = await res.json();
@@ -30,7 +32,7 @@ export async function GET(request) {
         const user = Array.isArray(data) ? data[0] : data;
 
         if (!user) {
-            return Response.json({ fullName: username }, { status: 200 });
+            return NextResponse.json({ fullName: username }, { status: 200 });
         }
 
         // Acumatica wraps field values in { value: "..." } objects
@@ -38,10 +40,10 @@ export async function GET(request) {
         const last = (user.LastName?.value ?? user.LastName ?? "").trim();
         const fullName = [first, last].filter(Boolean).join(" ") || username;
 
-        return Response.json({ fullName, first, last }, { status: 200 });
+        return NextResponse.json({ fullName, first, last }, { status: 200 });
     } catch (err) {
         console.error("[auth/me error]", err);
-        return Response.json({ fullName: "" }, { status: 200 });
+        return NextResponse.json({ fullName: "" }, { status: 200 });
     }
 }
 

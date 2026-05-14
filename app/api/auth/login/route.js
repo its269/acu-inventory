@@ -1,63 +1,73 @@
-const ACUMATICA_LOGIN_URL =
-    "https://accounting.holocrontrackertrading.com/ERP/entity/auth/login";
+const ACUMATICA_LOGIN_URL = "https://accounting.holocrontrackertrading.com/ERP/entity/auth/login";
 
 export async function POST(request) {
+    console.log("[auth/login] API hit");
+    
     try {
-        const { username, password, company } = await request.json();
-
-        if (!username || !password) {
-            return Response.json(
-                { message: "Username and password are required." },
-                { status: 400 }
-            );
+        const bodyText = await request.text();
+        console.log("[auth/login] raw body received:", bodyText);
+        
+        let bodyJson;
+        try {
+            bodyJson = JSON.parse(bodyText);
+        } catch (e) {
+            return new Response(JSON.stringify({ message: "Invalid JSON" }), {
+                status: 400,
+                headers: { "Content-Type": "application/json" }
+            });
         }
 
-        const body = {
-            name: username,       // Acumatica expects "name", not "username"
-            password,
-            ...(company && { company }),
+        const { username, password, company } = bodyJson;
+        if (!username || !password) {
+            return new Response(JSON.stringify({ message: "Missing credentials" }), {
+                status: 400,
+                headers: { "Content-Type": "application/json" }
+            });
+        }
+
+        const acuBody = {
+            name: username,
+            password: password,
+            ...(company && { company })
         };
 
+        console.log("[auth/login] sending fetch to Acumatica...");
         const acuResponse = await fetch(ACUMATICA_LOGIN_URL, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify(body),
-            // Forward cookies so Acumatica session is established
-            credentials: "include",
+            body: JSON.stringify(acuBody),
         });
 
-        // Acumatica returns 204 No Content on success
+        console.log("[auth/login] Acumatica responded with status:", acuResponse.status);
+
         if (acuResponse.status === 204 || acuResponse.ok) {
-            // Forward Set-Cookie headers from Acumatica to the browser
             const setCookie = acuResponse.headers.get("set-cookie");
-            const headers = new Headers();
-            headers.set("Content-Type", "application/json");
+            const responseHeaders = { "Content-Type": "application/json" };
             if (setCookie) {
-                headers.set("set-cookie", setCookie);
+                responseHeaders["set-cookie"] = setCookie;
             }
-            return new Response(
-                JSON.stringify({ success: true, message: "Login successful." }),
-                { status: 200, headers }
-            );
+            
+            return new Response(JSON.stringify({ success: true }), {
+                status: 200,
+                headers: responseHeaders
+            });
         }
 
-        // Try to parse error from Acumatica
-        let errorMessage = "Invalid credentials. Please try again.";
-        try {
-            const errorData = await acuResponse.json();
-            errorMessage = errorData?.message || errorData?.exceptionMessage || errorMessage;
-        } catch {
-            // Acumatica may return plain text on errors
-            const text = await acuResponse.text().catch(() => "");
-            if (text) errorMessage = text;
-        }
+        const errorText = await acuResponse.text().catch(() => "Login failed");
+        return new Response(JSON.stringify({ message: errorText }), {
+            status: acuResponse.status,
+            headers: { "Content-Type": "application/json" }
+        });
 
-        return Response.json({ message: errorMessage }, { status: acuResponse.status });
     } catch (err) {
-        console.error("[auth/login proxy error]", err);
-        return Response.json(
-            { message: "Unable to reach the authentication server." },
-            { status: 502 }
-        );
+        console.error("[auth/login CRITICAL ERROR]", err);
+        return new Response(JSON.stringify({ 
+            message: "Internal Server Error", 
+            error: err.message,
+            stack: err.stack 
+        }), {
+            status: 500,
+            headers: { "Content-Type": "application/json" }
+        });
     }
 }
