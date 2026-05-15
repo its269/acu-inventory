@@ -47,6 +47,13 @@ const IconRefresh = memo(() => (
     </svg>
 ));
 IconRefresh.displayName = "IconRefresh";
+const IconSync = memo(() => (
+    <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M21 2v6h-6" /><path d="M3 12a9 9 0 0 1 15-6.7L21 8" />
+        <path d="M3 22v-6h6" /><path d="M21 12a9 9 0 0 1-15 6.7L3 16" />
+    </svg>
+));
+IconSync.displayName = "IconSync";
 const IconEmpty = memo(() => (
     <svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1" strokeLinecap="round" strokeLinejoin="round">
         <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" />
@@ -192,6 +199,9 @@ export default function DashboardPage() {
     const [search, setSearch] = useState("");
     const [debouncedSearch, setDebouncedSearch] = useState("");
     const [loading, setLoading] = useState(true);
+    const [syncing, setSyncing] = useState(false);
+    const [isCounting, setIsCounting] = useState(false);
+    const [syncProgress, setSyncProgress] = useState({ current: 0, total: 30000, stage: "" });
     const [error, setError] = useState("");
     const [page, setPage] = useState(1);
     const [userName, setUserName] = useState("");
@@ -207,6 +217,7 @@ export default function DashboardPage() {
     const [showTransfer, setShowTransfer] = useState(false);
     const [showPO, setShowPO] = useState(false);
     const [showAudit, setShowAudit] = useState(false);
+    const [showSyncConfirm, setShowSyncConfirm] = useState(false);
 
     /* ── Transfer form state ────────────────────────── */
     const [transfer, setTransfer] = useState({ fromBranch: "", toBranch: "", itemId: "", qty: 1 });
@@ -252,40 +263,156 @@ export default function DashboardPage() {
 
     /* ── Fetch inventory — Server-side Pagination ────────────── */
     const fetchInventory = useCallback(async () => {
+        if (syncing) return; // DON'T fetch while syncing to avoid 429
         setLoading(true);
         setError("");
-
-        // Reset local data when changing page/search/branch to ensure a clean view
-        // instead of appending or keeping old stale data.
         setAllInventory([]);
 
         try {
-            const params = new URLSearchParams({
+            // Step 1: Fast fetch for data + count (from Supabase)
+            const dataParams = new URLSearchParams({
                 page: String(page),
                 pageSize: String(ROWS_PER_PAGE),
                 search: debouncedSearch,
                 branch: selectedBranch,
+                count: "true",
+                stats: "false",
+                source: "supabase" // Use Supabase for instant speed
             });
-            const url = `/api/inventory?${params.toString()}`;
-            const res = await fetch(url);
-
+            
+            const res = await fetch(`/api/inventory?${dataParams.toString()}`);
             if (res.status === 401) { router.push("/signin"); return; }
             if (!res.ok) { setError("Failed to load inventory."); return; }
 
             const result = await res.json();
-
-            // Strictly REPLACE the data with the new page's content
             setAllInventory(result.data || []);
             setTotalCount(result.totalCount || 0);
-            setGlobalStats(result.globalStats || { totalValue: 0, lowStock: 0, outOfStock: 0 });
             setHasMore(!!result.hasMore);
+            
+            setLoading(false);
+
+            // Step 2: Background fetch for stats (from Supabase)
+            const statsParams = new URLSearchParams({
+                page: "1",
+                pageSize: "1",
+                search: debouncedSearch,
+                branch: selectedBranch,
+                stats: "true",
+                count: "false",
+                source: "supabase"
+            });
+            
+            fetch(`/api/inventory?${statsParams.toString()}`)
+                .then(r => r.json())
+                .then(sResult => {
+                    if (sResult.globalStats) {
+                        setGlobalStats(sResult.globalStats);
+                    }
+                })
+                .catch(err => console.error("Stats fetch error:", err));
+
         } catch (err) {
             console.error("Fetch error:", err);
             setError("Unable to connect to the server.");
-        } finally {
             setLoading(false);
         }
-    }, [page, debouncedSearch, selectedBranch, router]);
+    }, [page, debouncedSearch, selectedBranch, router, syncing]);
+
+    /* ── Sync Data from Acumatica to Supabase ─────────── */
+    const startSync = useCallback(async (actualTotal) => {
+        setShowSyncConfirm(false);
+        setSyncing(true);
+        let totalToSync = actualTotal || 30000;
+        setSyncProgress({ current: 0, total: totalToSync, stage: "Phase 0: Initializing Turbo Sync..." });
+
+        const startTime = Date.now();
+
+        try {
+            if (!actualTotal) {
+                const countRes = await fetch("/api/inventory?count=true&pageSize=1&source=acumatica-direct");
+                const countData = await countRes.json();
+                totalToSync = countData.totalCount || 30000;
+                setSyncProgress(p => ({ ...p, total: totalToSync }));
+            }
+
+            setSyncProgress(p => ({ ...p, stage: "Phase 1: Syncing Branches..." }));
+            await fetch("/api/sync?type=branches", { method: "POST" });
+
+            const prodLimit = 1000;
+            let prodSkip = 0;
+            let prodHasMore = true;
+
+            while (prodHasMore) {
+                setSyncProgress({ 
+                    current: prodSkip, 
+                    total: totalToSync, 
+                    stage: `Phase 2: Products (${prodSkip.toLocaleString()} / ${totalToSync.toLocaleString()})` 
+                });
+                
+                const res = await fetch(`/api/sync?type=products&skip=${prodSkip}&limit=${prodLimit}`, { method: "POST" });
+                if (res.status === 429) { await new Promise(r => setTimeout(r, 10000)); continue; }
+                if (!res.ok) throw new Error("Product sync failed");
+                
+                const data = await res.json();
+                prodHasMore = data.hasMore;
+                prodSkip += prodLimit;
+                await new Promise(r => setTimeout(r, 200));
+            }
+
+            const levelLimit = 50; 
+            let levelSkip = 0;
+            const CONCURRENCY = 6;
+
+            while (levelSkip < totalToSync) {
+                setSyncProgress({ 
+                    current: levelSkip, 
+                    total: totalToSync, 
+                    stage: `Phase 3: Turbo Stock Sync (${levelSkip.toLocaleString()} / ${totalToSync.toLocaleString()})` 
+                });
+
+                const batches = [];
+                for (let i = 0; i < CONCURRENCY && (levelSkip + i * levelLimit) < totalToSync; i++) {
+                    const currentSkip = levelSkip + (i * levelLimit);
+                    batches.push(fetch(`/api/sync?type=levels&skip=${currentSkip}`, { method: "POST" }));
+                }
+
+                const responses = await Promise.all(batches);
+                const has429 = responses.some(r => r.status === 429);
+                
+                if (has429) {
+                    setSyncProgress(p => ({ ...p, stage: "Server busy, cooling down 10s..." }));
+                    await new Promise(r => setTimeout(r, 10000));
+                    continue;
+                }
+
+                levelSkip += (levelLimit * CONCURRENCY);
+                await new Promise(r => setTimeout(r, 400));
+            }
+
+            const duration = ((Date.now() - startTime) / 1000 / 60).toFixed(1);
+            addAudit(`Manual Sync Complete: ${totalToSync.toLocaleString()} items updated in ${duration} mins.`);
+            alert(`Sync Complete! Total time: ${duration} minutes.`);
+            fetchInventory(); 
+
+        } catch (err) {
+            console.error("Sync error:", err);
+            alert(`Sync interrupted: ${err.message}`);
+        } finally {
+            setSyncing(false);
+            setSyncProgress({ current: 0, total: 30000, stage: "" });
+        }
+    }, [fetchInventory, addAudit]);
+
+    const handleSyncClick = useCallback(() => {
+        setSyncProgress(p => ({ ...p, total: 0 }));
+        setShowSyncConfirm(true);
+        fetch("/api/inventory?count=true&pageSize=1&source=acumatica-direct")
+            .then(r => r.json())
+            .then(data => {
+                if (data.totalCount) setSyncProgress(p => ({ ...p, total: data.totalCount }));
+            })
+            .catch(e => console.warn("Background count fetch failed", e));
+    }, []);
 
     useEffect(() => {
         Promise.resolve().then(() => fetchInventory());
@@ -427,6 +554,60 @@ export default function DashboardPage() {
     ═════════════════════════════════════════════════════ */
     return (
         <div className="db-root">
+            {/* ── Sync Confirmation Modal ── */}
+            {showSyncConfirm && (
+                <div className="db-modal-overlay">
+                    <div className="db-modal" style={{ maxWidth: "400px" }}>
+                        <div className="db-modal-header">
+                            <div className="db-modal-title"><IconSync /><span>Sync Confirmation</span></div>
+                            <button className="db-modal-close" onClick={() => setShowSyncConfirm(false)}><IconClose /></button>
+                        </div>
+                        <div className="db-modal-body" style={{ textAlign: "center", padding: "2rem" }}>
+                            <div className="db-state-icon db-state-icon-blue" style={{ margin: "0 auto 1.5rem" }}><IconSync /></div>
+                            <h3>Start Incremental Sync?</h3>
+                            <p style={{ marginTop: "0.5rem", color: "#64748b" }}>
+                                {syncProgress.total > 0 ? (
+                                    <>This will process <strong>{syncProgress.total.toLocaleString()}</strong> items in turbo batches.</>
+                                ) : (
+                                    "Counting items in background..."
+                                )}
+                            </p>
+                            <p style={{ fontSize: "0.8125rem", marginTop: "1rem", color: "#94a3b8" }}>
+                                Turbo mode uses parallel requests to speed up syncing by 5x.
+                            </p>
+                        </div>
+                        <div className="db-modal-footer" style={{ justifyContent: "center", gap: "1rem" }}>
+                            <button className="db-btn-secondary" onClick={() => setShowSyncConfirm(false)}>Cancel</button>
+                            <button className="db-btn-primary" onClick={() => startSync(syncProgress.total)}>Yes, Start Sync</button>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {/* ── Sync Progress Overlay ── */}
+            {syncing && (
+                <div className="db-sync-overlay">
+                    <div className="db-sync-card">
+                        <div className="db-spinner db-spinner-lg" style={{ margin: "0 auto 1.5rem" }} />
+                        <h3>Turbo Syncing...</h3>
+                        <p>{syncProgress.stage}</p>
+                        
+                        <div className="db-progress-container">
+                            <div 
+                                className="db-progress-bar" 
+                                style={{ width: `${Math.min(100, (syncProgress.current / syncProgress.total) * 100)}%` }} 
+                            />
+                        </div>
+                        
+                        <div className="db-progress-stats">
+                            {syncProgress.current.toLocaleString()} / {syncProgress.total.toLocaleString()} processed
+                        </div>
+                        <p style={{ marginTop: "1rem", fontSize: "0.75rem" }}>
+                            Please do not close this tab. Turbo mode is active.
+                        </p>
+                    </div>
+                </div>
+            )}
 
             <main className="db-main">
 
@@ -486,6 +667,10 @@ export default function DashboardPage() {
                     </div>
 
                     <div className="db-toolbar-right">
+                        <button className={`db-action-btn db-action-sync ${syncing ? "db-btn-loading" : ""}`} onClick={handleSyncClick} disabled={syncing}>
+                            <IconSync />
+                            <span>{syncing ? "Syncing..." : "Sync Acumatica"}</span>
+                        </button>
                         <button className="db-action-btn db-action-audit" onClick={() => setShowAudit(true)}>
                             <IconAudit />
                             <span>Audit Log</span>
@@ -715,11 +900,11 @@ export default function DashboardPage() {
                 MODAL — Purchase Order
             ══════════════════════════════════════════ */}
             {showPO && (
-                <div className="db-modal-overlay" onClick={() => { if (!poSubmitted) { setPO(emptyPO()); setShowPO(false); } }}>
+                <div className="db-modal-overlay" onClick={() => { if (!poSubmitted) { setPO(clonePO()); setShowPO(false); } }}>
                     <div className="db-modal" onClick={(e) => e.stopPropagation()}>
                         <div className="db-modal-header">
                             <div className="db-modal-title"><IconPO /><span>Create Purchase Order</span></div>
-                            <button className="db-modal-close" onClick={() => { setPO(emptyPO()); setShowPO(false); }}><IconClose /></button>
+                            <button className="db-modal-close" onClick={() => { setPO(clonePO()); setShowPO(false); }}><IconClose /></button>
                         </div>
 
                         {poSubmitted ? (
@@ -778,7 +963,7 @@ export default function DashboardPage() {
                                 ))}
 
                                 <div className="db-modal-footer">
-                                    <button type="button" className="db-btn-secondary" onClick={() => { setPO(emptyPO()); setShowPO(false); }}>Cancel</button>
+                                    <button type="button" className="db-btn-secondary" onClick={() => { setPO(clonePO()); setShowPO(false); }}>Cancel</button>
                                     <button type="submit" className="db-btn-primary"><IconPO /> Submit PO</button>
                                 </div>
                             </form>

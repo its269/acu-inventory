@@ -4,32 +4,75 @@ const toISODate = (date) => date.toISOString().split("T")[0];
 
 // In-memory caches to improve performance and avoid redundant ERP hits
 const countCache = new Map();
+const statsCache = new Map();
 const branchCache = {
     data: null,
     timestamp: 0
 };
+
+// Helper for delays
+const sleep = (ms) => new Promise(res => setTimeout(ms, res));
 
 /**
  * Service for interacting with Acumatica ERP.
  * This acts as the core of our BFF (Backend-for-Frontend) layer.
  */
 export const AcumaticaService = {
-    /** ── HELPER: Generic multi-page fetcher ── */
+    /** ── HELPER: Generic multi-page fetcher with Retry for 429/500 ── */
     async fetchAllPages(url, cookie, pageSize = 500) {
         const results = [];
         for (let skip = 0; skip < 20000; skip += pageSize) {
             const sep = url.includes("?") ? "&" : "?";
-            const res = await fetch(`${url}${sep}$top=${pageSize}&$skip=${skip}`, {
-                headers: { Cookie: cookie, Accept: "application/json" },
-                cache: "no-store",
-            });
-            if (res.status === 401) throw new Error("Unauthorized");
-            if (!res.ok) throw new Error(`Fetch failed: ${res.status}`);
+            const fullUrl = `${url}${sep}$top=${pageSize}&$skip=${skip}`;
             
-            const data = await res.json();
-            const items = data.value ?? data.d?.results ?? (Array.isArray(data) ? data : []);
-            results.push(...items);
-            if (items.length < pageSize) break;
+            let attempts = 0;
+            let success = false;
+            
+            while (attempts < 3 && !success) {
+                try {
+                    const res = await fetch(fullUrl, {
+                        headers: { Cookie: cookie, Accept: "application/json" },
+                        cache: 'no-store',
+                    });
+
+                    if (res.status === 401) {
+                        console.error("[Acumatica] Session expired or unauthorized during sync.");
+                        throw new Error("Unauthorized");
+                    }
+                    
+                    if (res.status === 429 || res.status === 500) {
+                        const wait = (attempts + 1) * 5000; // Increase to 5s, 10s, 15s
+                        console.warn(`[Acumatica] Status ${res.status}. Retrying (${attempts + 1}/3) in ${wait}ms...`);
+                        await new Promise(r => setTimeout(r, wait));
+                        attempts++;
+                        continue;
+                    }
+
+                    if (!res.ok) throw new Error(`Fetch failed: ${res.status}`);
+                    
+                    const data = await res.json();
+                    const items = data.value ?? data.d?.results ?? (Array.isArray(data) ? data : []);
+                    results.push(...items);
+                    
+                    if (items.length < pageSize) {
+                        success = true;
+                        break;
+                    }
+                    
+                    success = true;
+                    // Breath between pages: 500ms (half a second) to stay under the radar
+                    await new Promise(r => setTimeout(r, 500));
+                } catch (fetchErr) {
+                    if (fetchErr.message === "Unauthorized") throw fetchErr;
+                    console.error(`[Acumatica Fetch Error] Attempt ${attempts + 1}:`, fetchErr.message);
+                    attempts++;
+                    if (attempts >= 3) throw fetchErr;
+                    await new Promise(r => setTimeout(r, 2000));
+                }
+            }
+            
+            if (!success) throw new Error(`Failed to fetch page at skip ${skip} after multiple retries.`);
+            if (results.length >= 20000) break;
         }
         return results;
     },
@@ -92,9 +135,10 @@ export const AcumaticaService = {
     },
 
     /** ── INVENTORY: Get Paginated List ── */
-    async getStockItems({ page, pageSize, search, branch, cookie }) {
+    async getStockItems({ page, pageSize, search, branch, cookie, includeStats = false, includeCount = false }) {
         const skip = (page - 1) * pageSize;
         const cacheKey = `count-${search}-${branch}`;
+        const statsKey = `stats-${search}-${branch}`;
         let filterParts = [];
         
         if (search) {
@@ -108,26 +152,35 @@ export const AcumaticaService = {
 
         const filterStr = filterParts.length > 0 ? `&$filter=${filterParts.join(" and ")}` : "";
         const selectFields = "InventoryID,Description,DefaultWarehouseID,DefaultPrice,ItemClass";
+        
         const cachedCount = countCache.get(cacheKey);
+        const cachedStats = statsCache.get(statsKey);
         
         const dataUrl = `${ACU_BASE}/StockItem?$expand=WarehouseDetails&$select=${selectFields}&$top=${pageSize}&$skip=${skip}${filterStr}`;
         
-        // Stats: Fetch top 1000 items to calculate dashboard card values (Price x Stock)
-        const statsUrl = `${ACU_BASE}/StockItem?$expand=WarehouseDetails($select=QtyOnHand)&$select=InventoryID,DefaultPrice,WarehouseDetails/QtyOnHand&$top=1000${filterStr}`;
-        
-        // Count: Fetch up to 10000 IDs for accurate pagination count
-        const countUrl = `${ACU_BASE}/StockItem?$select=InventoryID&$top=10000${filterStr}`;
-
         const promises = [
-            fetch(dataUrl, { headers: { Accept: "application/json", Cookie: cookie }, cache: 'no-store' }),
-            fetch(statsUrl, { headers: { Accept: "application/json", Cookie: cookie }, cache: 'no-store' }),
-            fetch(countUrl, { headers: { Accept: "application/json", Cookie: cookie }, cache: 'no-store' })
+            fetch(dataUrl, { headers: { Accept: "application/json", Cookie: cookie }, cache: 'no-store' })
         ];
+
+        let statsPromiseIdx = -1;
+        let countPromiseIdx = -1;
+
+        // ONLY fetch stats if requested AND not in cache
+        if (includeStats && !cachedStats) {
+            const statsUrl = `${ACU_BASE}/StockItem?$expand=WarehouseDetails&$select=DefaultPrice,WarehouseDetails&$top=1000${filterStr}`;
+            statsPromiseIdx = promises.length;
+            promises.push(fetch(statsUrl, { headers: { Accept: "application/json", Cookie: cookie }, cache: 'no-store' }));
+        }
+
+        // ONLY fetch count if requested AND not in cache
+        if (includeCount && !cachedCount) {
+            const countUrl = `${ACU_BASE}/StockItem?$select=InventoryID&$top=10000${filterStr}`;
+            countPromiseIdx = promises.length;
+            promises.push(fetch(countUrl, { headers: { Accept: "application/json", Cookie: cookie }, cache: 'no-store' }));
+        }
 
         const results = await Promise.all(promises);
         const res = results[0];
-        const statsRes = results[1];
-        const countRes = results[2];
 
         if (res.status === 401) throw new Error("Unauthorized");
         if (!res.ok) throw new Error(`Acumatica Error: ${res.status}`);
@@ -135,34 +188,44 @@ export const AcumaticaService = {
         const data = await res.json();
         const rawItems = data.value || (Array.isArray(data) ? data : []);
 
-        let globalStats = { totalValue: 0, lowStock: 0, outOfStock: 0, count: 0 };
-        if (statsRes && statsRes.ok) {
-            const sData = await statsRes.json();
+        let globalStats = cachedStats || { totalValue: 0, lowStock: 0, outOfStock: 0, count: 0 };
+        if (includeStats && !cachedStats && statsPromiseIdx !== -1 && results[statsPromiseIdx].ok) {
+            const sData = await results[statsPromiseIdx].json();
             const sItems = sData.value || [];
             
+            // Re-initialize to zero for fresh calculation
+            globalStats = { totalValue: 0, lowStock: 0, outOfStock: 0, count: 0 };
+
             for (const item of sItems) {
                 const price = Number(item.DefaultPrice?.value ?? item.DefaultPrice ?? 0);
                 let onHand = 0;
-                (item.WarehouseDetails || []).forEach(wh => {
-                    onHand += Number(wh.QtyOnHand?.value ?? wh.QtyOnHand ?? 0);
-                });
-                globalStats.totalValue += price * onHand;
+                const wds = item.WarehouseDetails || [];
+
+                if (branch) {
+                    const wh = wds.find(w => (w.WarehouseID?.value ?? w.WarehouseID ?? "").toString().toLowerCase() === branch.toLowerCase());
+                    onHand = Number(wh?.QtyOnHand?.value ?? wh?.QtyOnHand ?? 0);
+                } else {
+                    wds.forEach(wh => { onHand += Number(wh.QtyOnHand?.value ?? wh.QtyOnHand ?? 0); });
+                }
+
+                if (!isNaN(price) && !isNaN(onHand)) globalStats.totalValue += price * onHand;
                 if (onHand <= 0) globalStats.outOfStock++;
                 else if (onHand <= 10) globalStats.lowStock++;
             }
+            statsCache.set(statsKey, globalStats);
         }
 
         let totalCount = cachedCount || 0;
-        if (!totalCount && countRes && countRes.ok) {
-            const cData = await countRes.json();
+        if (includeCount && !cachedCount && countPromiseIdx !== -1 && results[countPromiseIdx].ok) {
+            const cData = await results[countPromiseIdx].json();
             const cItems = cData.value || (Array.isArray(cData) ? cData : []);
             totalCount = cItems.length;
             if (totalCount > 0) countCache.set(cacheKey, totalCount);
         }
-        globalStats.count = totalCount;
+        
+        // Ensure stats object always has correct count even if not re-calculated
+        if (totalCount > 0) globalStats.count = totalCount;
 
-        // More robust hasMore: if we have a full page, there's likely more data
-        // even if our totalCount (limited to 10000) says otherwise.
         const hasMore = totalCount > (skip + rawItems.length) || rawItems.length === pageSize;
 
         return {
