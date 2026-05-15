@@ -112,7 +112,7 @@ const IconTruck = memo(() => (
 IconTruck.displayName = "IconTruck";
 
 /* ── Constants (module-level — never recreated) ─────────── */
-const ROWS_PER_PAGE = 10;
+const ROWS_PER_PAGE = 15;
 const LOW_STOCK_THRESHOLD = 10;
 const EMPTY_PO = { vendor: "", items: [{ id: "", qty: 1 }] };
 
@@ -125,8 +125,17 @@ const getStatus = (onHand) => {
 const STATUS_LABEL = { IN_STOCK: "In Stock", LOW_STOCK: "Low Stock", OUT_OF_STOCK: "Out of Stock" };
 const STATUS_CLASS = { IN_STOCK: "db-status-in", LOW_STOCK: "db-status-low", OUT_OF_STOCK: "db-status-out" };
 const ts = () => new Date().toLocaleTimeString("en-PH", { hour: "2-digit", minute: "2-digit", second: "2-digit" });
-const fmtNum = (val) => { const n = Number(val); return isNaN(n) ? "—" : n.toLocaleString("en-PH", { minimumFractionDigits: 2 }); };
-const cellVal = (row, key) => row[key]?.value ?? "—";
+const fmtNum = (val) => { 
+    if (typeof val === "object" && val !== null) return "—";
+    const n = Number(val); 
+    return isNaN(n) ? "—" : n.toLocaleString("en-PH", { minimumFractionDigits: 2 }); 
+};
+const cellVal = (row, key) => {
+    const val = row[key]?.value;
+    if (val === null || val === undefined) return "—";
+    if (typeof val === "object") return "—"; // Prevent rendering {} objects
+    return val;
+};
 const formatDateInput = (date) => {
     const year = date.getFullYear();
     const month = String(date.getMonth() + 1).padStart(2, "0");
@@ -148,7 +157,7 @@ const InventoryRow = memo(({ row, index }) => {
     const onHand = Number(row.OnHand?.value) || 0;
     const available = Number(row.Available?.value) || 0;
     const status = getStatus(onHand);
-    console.log(`hello world`);
+    
     return (
         <tr className={status === "LOW_STOCK" ? "db-row-warn" : status === "OUT_OF_STOCK" ? "db-row-danger" : ""}>
             <td className="db-row-num">{index}</td>
@@ -176,6 +185,7 @@ export default function DashboardPage() {
     /* ── Core state ─────────────────────────────────── */
     const [allInventory, setAllInventory] = useState([]);
     const [totalCount, setTotalCount] = useState(0);
+    const [globalStats, setGlobalStats] = useState({ totalValue: 0, lowStock: 0, outOfStock: 0 });
     const [hasMore, setHasMore] = useState(false);
     const [selectedBranch, setSelectedBranch] = useState("");
     const [branchOptions, setBranchOptions] = useState([]);
@@ -267,6 +277,7 @@ export default function DashboardPage() {
             // Strictly REPLACE the data with the new page's content
             setAllInventory(result.data || []);
             setTotalCount(result.totalCount || 0);
+            setGlobalStats(result.globalStats || { totalValue: 0, lowStock: 0, outOfStock: 0 });
             setHasMore(!!result.hasMore);
         } catch (err) {
             console.error("Fetch error:", err);
@@ -301,6 +312,13 @@ export default function DashboardPage() {
         }
         return { uniqueItems: seenIds.size, totalValue, lowStock, outOfStock };
     }, [inventory]);
+
+    // Use globalStats for cards, falling back to local stats if not available
+    const displayStats = useMemo(() => ({
+        totalValue: globalStats.totalValue > 0 ? globalStats.totalValue : stats.totalValue,
+        lowStock: globalStats.lowStock > 0 ? globalStats.lowStock : stats.lowStock,
+        outOfStock: globalStats.outOfStock > 0 ? globalStats.outOfStock : stats.outOfStock,
+    }), [globalStats, stats]);
 
     // Pagination
     const totalPages = useMemo(() => {
@@ -428,18 +446,18 @@ export default function DashboardPage() {
                     <div className="db-stat-card">
                         <span className="db-stat-label">Total Value</span>
                         <span className="db-stat-value">
-                            ₱{stats.totalValue.toLocaleString("en-PH", { minimumFractionDigits: 0, maximumFractionDigits: 0 })}
+                            ₱{displayStats.totalValue.toLocaleString("en-PH", { minimumFractionDigits: 0, maximumFractionDigits: 0 })}
                         </span>
                         <span className="db-stat-sub">Price × On-Hand stock</span>
                     </div>
                     <div className="db-stat-card db-stat-warn">
                         <span className="db-stat-label">⚠ Low Stock Alerts</span>
-                        <span className="db-stat-value">{stats.lowStock.toLocaleString()}</span>
+                        <span className="db-stat-value">{displayStats.lowStock.toLocaleString()}</span>
                         <span className="db-stat-sub">Items ≤ {LOW_STOCK_THRESHOLD} units</span>
                     </div>
                     <div className="db-stat-card db-stat-danger">
                         <span className="db-stat-label">🚫 Out of Stock</span>
-                        <span className="db-stat-value">{stats.outOfStock.toLocaleString()}</span>
+                        <span className="db-stat-value">{displayStats.outOfStock.toLocaleString()}</span>
                         <span className="db-stat-sub">Zero units on hand</span>
                     </div>
                 </div>
@@ -551,42 +569,44 @@ export default function DashboardPage() {
                 </div>
 
                 {/* ── Pagination ─────────────────────────── */}
-                {!loading && (totalPages > 1 || page > 1) && (
+                {!loading && inventory.length > 0 && (totalPages > 1 || page > 1) && (
                     <div className="db-pagination">
                         <span className="db-page-info">
-                            Showing {((page - 1) * ROWS_PER_PAGE) + 1}–{((page - 1) * ROWS_PER_PAGE) + inventory.length} of {totalCount || (hasMore ? "many" : inventory.length)} items
+                            Showing {((page - 1) * ROWS_PER_PAGE) + 1}–{((page - 1) * ROWS_PER_PAGE) + inventory.length} 
+                            {totalCount > 0 ? ` of ${totalCount.toLocaleString()} items` : " items"}
                         </span>
                         <div className="db-page-btns">
-                            <button className="db-page-btn db-page-btn-nav" disabled={page === 1} onClick={() => setPage(1)} aria-label="First page">&laquo;</button>
-                            <button className="db-page-btn db-page-btn-nav" disabled={page === 1} onClick={() => setPage(p => p - 1)} aria-label="Previous page">&lsaquo;</button>
+                            <button className="db-page-btn db-page-btn-nav" disabled={page === 1} onClick={() => setPage(p => p - 1)} title="Previous Page">&lsaquo;</button>
 
                             {(() => {
                                 const pages = [];
-                                // Force totalCount to at least show 300 if hasMore is true but total is 0 
-                                // just to satisfy the requested design while debugging the API count issue.
-                                const displayTotal = totalCount > 0 ? totalPages : (hasMore ? 300 : page);
+                                const actualTotalPages = totalPages;
                                 const current = page;
-
-                                if (displayTotal <= 7) {
-                                    for (let i = 1; i <= displayTotal; i++) pages.push(i);
+                                const delta = 2; 
+                                
+                                if (actualTotalPages <= 7) {
+                                    for (let i = 1; i <= actualTotalPages; i++) pages.push(i);
                                 } else {
-                                    // Always show 1, 2, 3
-                                    pages.push(1, 2, 3);
-
-                                    if (current > 4) {
+                                    // Laging ipakita ang Page 1
+                                    pages.push(1);
+                                    
+                                    const start = Math.max(2, current - delta);
+                                    const end = Math.min(actualTotalPages - 1, current + delta);
+                                    
+                                    if (start > 2) {
                                         pages.push("...");
                                     }
-
-                                    // Center range if current is far from start/end
-                                    if (current > 3 && current < displayTotal - 2) {
-                                        if (current > 4) pages.push(current);
-                                        pages.push("...");
-                                    } else if (current >= displayTotal - 2) {
+                                    
+                                    for (let i = start; i <= end; i++) {
+                                        pages.push(i);
+                                    }
+                                    
+                                    if (end < actualTotalPages - 1) {
                                         pages.push("...");
                                     }
-
-                                    // Always show last page
-                                    pages.push(displayTotal);
+                                    
+                                    // Laging ipakita ang Last Page Number
+                                    pages.push(actualTotalPages);
                                 }
 
                                 return pages.map((p, i) => (
@@ -601,9 +621,8 @@ export default function DashboardPage() {
                                     )
                                 ));
                             })()}
-
-                            <button className="db-page-btn db-page-btn-nav" disabled={!hasMore && page >= totalPages} onClick={() => setPage(p => p + 1)} aria-label="Next page">&rsaquo;</button>
-                            <button className="db-page-btn db-page-btn-nav" disabled={!hasMore && page >= totalPages} onClick={() => setPage(totalCount > 0 ? totalPages : page + 1)} aria-label="Last page">&raquo;</button>
+                            
+                            <button className="db-page-btn db-page-btn-nav" disabled={!hasMore && page >= totalPages} onClick={() => setPage(p => p + 1)} title="Next Page">&rsaquo;</button>
                         </div>
                     </div>
                 )}
