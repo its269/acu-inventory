@@ -138,6 +138,49 @@ export async function POST(request) {
             });
         }
 
+        // --- PHASE D: SALES (GI640113) ---
+        if (type === "sales") {
+            const finalLimit = limit > 500 ? 500 : limit;
+            const skip = parseInt(searchParams.get("skip") || "0");
+            
+            // For GIs, we might not have Keyset pagination unless configured, 
+            // so we use skip for now but recommend Top/Skip or Date filtering.
+            const raw = await AcumaticaService.getPeriodicSales({
+                cookie,
+                top: finalLimit,
+                skip: skip
+            });
+
+            const salesUpserts = raw.map(item => ({
+                branch_name: item.BranchName?.value || item.BranchName || "",
+                order_type: item.OrderType?.value || item.OrderType || "",
+                financial_period: item.FinancialPeriod?.value || item.FinancialPeriod || "",
+                document_date: item.DocumentDate?.value || item.DocumentDate || null,
+                description: item.Description?.value || item.Description || "",
+                qty: Number(item.Qty?.value ?? 0),
+                total_amount: Number(item.TotalAmount?.value ?? 0),
+                item_class: item.ItemClass?.value || item.ItemClass || "",
+                inventory_id: item.InventoryID?.value || item.InventoryID || "",
+                posting_class: item.PostingClass?.value || item.PostingClass || "",
+                last_sync: new Date().toISOString()
+            })).filter(s => s.inventory_id);
+
+            if (salesUpserts.length > 0) {
+                const { error: upsertError } = await supabase.from('product_periodic_sales').upsert(salesUpserts);
+                if (upsertError) {
+                    console.error("[Sales Sync Error]", upsertError);
+                    throw upsertError;
+                }
+            }
+
+            return NextResponse.json({
+                success: true,
+                count: salesUpserts.length,
+                skip: skip + raw.length,
+                hasMore: raw.length === finalLimit
+            });
+        }
+
         return NextResponse.json({ message: "Invalid type" }, { status: 400 });
 
     } catch (err) {

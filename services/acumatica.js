@@ -300,5 +300,24 @@ export const AcumaticaService = {
         });
 
         return { data: rows, days, startDate: toISODate(start), endDate: toISODate(end) };
+    },
+
+    /** ── PERIODIC SALES: Get Data from GI640113 ── */
+    async getPeriodicSales({ cookie, branch, startDate, endDate, top = 1000, skip = 0 }) {
+        // GI endpoints are often at the root of the Default endpoint if published
+        let url = `${ACU_BASE}/GI640113?$top=${top}&$skip=${skip}`;
+        
+        let filterParts = [];
+        if (startDate) filterParts.push(`DocumentDate ge datetime'${startDate}T00:00:00'`);
+        if (endDate) filterParts.push(`DocumentDate le datetime'${endDate}T23:59:59'`);
+        if (branch) filterParts.push(`BranchName eq '${branch.replace(/'/g, "''")}'`);
+
+        if (filterParts.length > 0) {
+            url += `&$filter=${filterParts.join(" and ")}`;
+        }
+
+        const res = await this.fetchWithRetry(url, cookie);
+        const data = await res.json();
+        return data.value || [];
     }
 };

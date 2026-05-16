@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback, useEffect, memo } from "react";
+import { useState, useCallback, useEffect, memo, Fragment } from "react";
 import { useRouter } from "next/navigation";
 import "@/styles/dashboard.css";
 
@@ -51,6 +51,7 @@ export default function SalesPage() {
     const [selectedBranch, setSelectedBranch] = useState("");
 
     const [salesData, setSalesData] = useState([]);
+    const [months, setMonths] = useState([]);
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState("");
     const [salesDays, setSalesDays] = useState(90);
@@ -85,14 +86,19 @@ export default function SalesPage() {
         setLoading(true);
         setError("");
         setSalesData([]);
+        setMonths([]);
         try {
             const params = new URLSearchParams({ branch: branch ?? selectedBranch, startDate: from, endDate: to });
-            const res = await fetch(`/api/sales-history?${params.toString()}`);
+            const res = await fetch(`/api/sales-periodic?${params.toString()}`);
             if (res.status === 401) { router.push("/signin"); return; }
             if (!res.ok) { setError("Failed to load sales history."); return; }
             const result = await res.json();
             setSalesData(result.data || []);
-            setSalesDays(result.days || 90);
+            setMonths(result.months || []);
+            
+            const d1 = new Date(from);
+            const d2 = new Date(to);
+            setSalesDays(Math.round((d2 - d1) / (1000 * 60 * 60 * 24)));
         } catch {
             setError("Unable to connect to the server.");
         } finally {
@@ -102,43 +108,54 @@ export default function SalesPage() {
 
     /* ── Export CSV ─────────────────────────────────────── */
     const exportCSV = useCallback(() => {
-        const headers = ["Inventory ID", "Description", "Item Class", "Posting Class", "Inv", "Coming", "Inv+Coming", `Last ${salesDays}d`, "Avg/Day", "Consume Days", "MOH", "NTO", "Remarks"];
-        const rows = salesData.map((r) => [
-            r.inventoryId, r.description, r.itemClass, r.postingClass,
-            r.inv, r.coming, r.invPlusComing, r.last3mQty,
-            r.avgPerDay, r.consumeDays, r.moh, r.nto, r.remarks,
-        ].map((v) => `"${String(v ?? "").replace(/"/g, '""')}"`).join(","));
+        const headers = ["Inventory ID", "Branch Name", "Description"];
+        months.forEach(m => {
+            headers.push(`${m.label} Qty`);
+            headers.push(`${m.label} Sales`);
+        });
+        headers.push("Total Qty");
+        headers.push("Total Sales");
+
+        const rows = salesData.map((r) => {
+            const row = [r.inventoryId, r.branchName, r.description];
+            months.forEach(m => {
+                row.push(r.monthlyData[m.key]?.qty || 0);
+                row.push(r.monthlyData[m.key]?.sales || 0);
+            });
+            row.push(r.totalQty);
+            row.push(r.totalSales);
+            return row.map((v) => `"${String(v ?? "").replace(/"/g, '""')}"`).join(",");
+        });
+
         const csv = [headers.join(","), ...rows].join("\n");
         const blob = new Blob([csv], { type: "text/csv" });
         const url = URL.createObjectURL(blob);
         const a = document.createElement("a");
         a.href = url;
-        a.download = `sales-analysis-${selectedBranch || "all"}-${fromDate}-to-${toDate}.csv`;
+        a.download = `sales-periodic-${selectedBranch || "all"}-${fromDate}-to-${toDate}.csv`;
         a.click();
         URL.revokeObjectURL(url);
-    }, [salesData, selectedBranch, fromDate, toDate, salesDays]);
+    }, [salesData, selectedBranch, fromDate, toDate, months]);
 
     /* ── Handle branch change ───────────────────────────── */
     const handleBranchChange = useCallback((e) => {
         const branch = e.target.value;
         setSelectedBranch(branch);
-        // Re-run analysis with new branch if data is already loaded
         if (salesData.length > 0) {
             fetchSales(fromDate, toDate, branch);
         }
     }, [salesData.length, fromDate, toDate, fetchSales]);
 
     /* ── Derived summary ────────────────────────────────── */
-    const reorderCount = salesData.filter(r => r.remarks === "Reorder").length;
-    const overstockCount = salesData.filter(r => r.remarks === "Overstock").length;
-    const totalQtySold = salesData.reduce((s, r) => s + r.last3mQty, 0);
+    const totalQtySold = salesData.reduce((s, r) => s + r.totalQty, 0);
+    const totalAmountSold = salesData.reduce((s, r) => s + r.totalSales, 0);
 
     return (
         <div className="db-main">
             {/* ── Page title ─────────────────────────────── */}
             <div className="db-page-title">
-                <h1>Last 3 Months Sales</h1>
-                <p>Analyze inventory movement, consumption rate, and reorder requirements.</p>
+                <h1>Product Periodic Sales</h1>
+                <p>Analyze monthly sales trends across different branches.</p>
             </div>
 
             {/* ── Filter toolbar ─────────────────────────── */}
@@ -231,23 +248,19 @@ export default function SalesPage() {
                     <div className="db-sales3m-summary">
                         <div className="db-sales3m-card">
                             <span className="db-sales3m-card-val">{salesData.length}</span>
-                            <span className="db-sales3m-card-label">Total Items</span>
-                        </div>
-                        <div className="db-sales3m-card db-sales3m-card-danger">
-                            <span className="db-sales3m-card-val">{reorderCount}</span>
-                            <span className="db-sales3m-card-label">Reorder</span>
-                        </div>
-                        <div className="db-sales3m-card db-sales3m-card-warn">
-                            <span className="db-sales3m-card-val">{overstockCount}</span>
-                            <span className="db-sales3m-card-label">Overstock</span>
+                            <span className="db-sales3m-card-label">Unique Products</span>
                         </div>
                         <div className="db-sales3m-card db-sales3m-card-blue">
                             <span className="db-sales3m-card-val">{totalQtySold.toLocaleString("en-PH", { maximumFractionDigits: 0 })}</span>
                             <span className="db-sales3m-card-label">Total Qty Sold</span>
                         </div>
+                        <div className="db-sales3m-card db-sales3m-card-warn">
+                            <span className="db-sales3m-card-val">₱{(totalAmountSold/1000).toFixed(1)}K</span>
+                            <span className="db-sales3m-card-label">Total Revenue</span>
+                        </div>
                         <div className="db-sales3m-card">
-                            <span className="db-sales3m-card-val">{salesDays}d</span>
-                            <span className="db-sales3m-card-label">{fromDate} → {toDate}</span>
+                            <span className="db-sales3m-card-val">{months.length}</span>
+                            <span className="db-sales3m-card-label">Months Selected</span>
                         </div>
                     </div>
 
@@ -256,43 +269,39 @@ export default function SalesPage() {
                         <table className="db-table db-sales3m-table">
                             <thead>
                                 <tr>
-                                    <th>#</th>
-                                    <th>Inventory ID</th>
-                                    <th>Description</th>
-                                    <th>Item Class</th>
-                                    <th>Posting Class</th>
-                                    <th className="db-num">Inv</th>
-                                    <th className="db-num">Coming</th>
-                                    <th className="db-num">Inv+Coming</th>
-                                    <th className="db-num">Last {salesDays}d</th>
-                                    <th className="db-num">Avg/Day</th>
-                                    <th className="db-num">Consume Days</th>
-                                    <th className="db-num">MOH</th>
-                                    <th className="db-num">NTO</th>
-                                    <th>Remarks</th>
+                                    <th rowSpan="2">#</th>
+                                    <th rowSpan="2">Inventory ID</th>
+                                    <th rowSpan="2">Branch</th>
+                                    {months.map(m => (
+                                        <th key={m.key} colSpan="2" className="db-centered-header">{m.label}</th>
+                                    ))}
+                                    <th colSpan="2" className="db-centered-header">Total Period</th>
+                                </tr>
+                                <tr>
+                                    {months.map(m => (
+                                        <Fragment key={m.key + "-sub"}>
+                                            <th className="db-num">Qty</th>
+                                            <th className="db-num">Sales</th>
+                                        </Fragment>
+                                    ))}
+                                    <th className="db-num">Qty</th>
+                                    <th className="db-num">Sales</th>
                                 </tr>
                             </thead>
                             <tbody>
                                 {salesData.map((r, i) => (
-                                    <tr key={r.inventoryId + i} className={r.remarks === "Reorder" ? "db-row-danger" : "db-row-warn"}>
+                                    <tr key={r.inventoryId + r.branchName + i}>
                                         <td className="db-row-num">{i + 1}</td>
                                         <td><span className="db-inv-id">{r.inventoryId}</span></td>
-                                        <td className="db-desc">{r.description}</td>
-                                        <td><span className="db-class-tag">{r.itemClass}</span></td>
-                                        <td>{r.postingClass}</td>
-                                        <td className="db-num">{r.inv.toLocaleString()}</td>
-                                        <td className="db-num">{r.coming.toLocaleString()}</td>
-                                        <td className="db-num"><strong>{r.invPlusComing.toLocaleString()}</strong></td>
-                                        <td className="db-num"><span className="db-badge db-badge-blue">{r.last3mQty.toLocaleString()}</span></td>
-                                        <td className="db-num">{r.avgPerDay.toFixed(2)}</td>
-                                        <td className="db-num">{r.consumeDays >= 9999 ? "∞" : r.consumeDays.toFixed(2)}</td>
-                                        <td className="db-num">{r.moh >= 9999 ? "∞" : r.moh.toFixed(2)}</td>
-                                        <td className={`db-num ${r.nto > 0 ? "db-nto-positive" : "db-nto-negative"}`}>{r.nto.toFixed(2)}</td>
-                                        <td>
-                                            <span className={`db-status-badge ${r.remarks === "Reorder" ? "db-status-out" : "db-status-low"}`}>
-                                                {r.remarks}
-                                            </span>
-                                        </td>
+                                        <td>{r.branchName}</td>
+                                        {months.map(m => (
+                                            <Fragment key={m.key + "-val"}>
+                                                <td className="db-num">{r.monthlyData[m.key]?.qty.toLocaleString() || 0}</td>
+                                                <td className="db-num">₱{r.monthlyData[m.key]?.sales.toLocaleString() || 0}</td>
+                                            </Fragment>
+                                        ))}
+                                        <td className="db-num"><strong>{r.totalQty.toLocaleString()}</strong></td>
+                                        <td className="db-num"><strong>₱{r.totalSales.toLocaleString()}</strong></td>
                                     </tr>
                                 ))}
                             </tbody>
