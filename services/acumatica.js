@@ -18,60 +18,69 @@ const sleep = (ms) => new Promise(res => setTimeout(ms, res));
  * This acts as the core of our BFF (Backend-for-Frontend) layer.
  */
 export const AcumaticaService = {
-    /** ── HELPER: Generic multi-page fetcher with Retry for 429/500 ── */
+    /** ── HELPER: Robust Fetch with Retries ── */
+    async fetchWithRetry(url, cookie, options = {}) {
+        let lastError = null;
+        const maxAttempts = 3;
+        
+        for (let attempts = 1; attempts <= maxAttempts; attempts++) {
+            try {
+                // Mimic browser headers to avoid being blocked by ERP security rules
+                const res = await fetch(url, {
+                    ...options,
+                    headers: {
+                        "Accept": "application/json",
+                        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+                        "Cookie": cookie || "",
+                        ...options.headers,
+                    },
+                    cache: 'no-store',
+                });
+
+                if (res.status === 401) {
+                    console.error(`[Acumatica] 401 Unauthorized at ${url}. Cookie length: ${cookie?.length || 0}`);
+                    throw new Error("Unauthorized");
+                }
+
+                if (res.status === 429 || res.status === 500 || res.status === 503) {
+                    const errorText = await res.text().catch(() => "No error body");
+                    console.warn(`[Acumatica] Status ${res.status}. Retry ${attempts}/${maxAttempts}. Body: ${errorText.substring(0, 100)}`);
+                    await new Promise(r => setTimeout(r, 2000 * attempts)); // Faster retry for 429
+                    lastError = new Error(`Acumatica Error: ${res.status}`);
+                    continue;
+                }
+
+                if (!res.ok) throw new Error(`Acumatica Error: ${res.status}`);
+
+                return res; 
+            } catch (err) {
+                if (err.message === "Unauthorized") throw err;
+                console.error(`[Acumatica Fetch Error] Attempt ${attempts}:`, err.message);
+                lastError = err;
+                if (attempts < maxAttempts) {
+                    await new Promise(r => setTimeout(r, 1500 * attempts));
+                }
+            }
+        }
+        throw lastError || new Error("Failed to fetch after multiple retries");
+    },
+
+    /** ── HELPER: Generic multi-page fetcher with Retry ── */
     async fetchAllPages(url, cookie, pageSize = 500) {
         const results = [];
         for (let skip = 0; skip < 20000; skip += pageSize) {
             const sep = url.includes("?") ? "&" : "?";
             const fullUrl = `${url}${sep}$top=${pageSize}&$skip=${skip}`;
             
-            let attempts = 0;
-            let success = false;
+            const res = await this.fetchWithRetry(fullUrl, cookie);
+            const data = await res.json();
+            const items = data.value ?? data.d?.results ?? (Array.isArray(data) ? data : []);
+            results.push(...items);
             
-            while (attempts < 3 && !success) {
-                try {
-                    const res = await fetch(fullUrl, {
-                        headers: { Cookie: cookie, Accept: "application/json" },
-                        cache: 'no-store',
-                    });
-
-                    if (res.status === 401) {
-                        console.error("[Acumatica] Session expired or unauthorized during sync.");
-                        throw new Error("Unauthorized");
-                    }
-                    
-                    if (res.status === 429 || res.status === 500) {
-                        const wait = (attempts + 1) * 5000; // Increase to 5s, 10s, 15s
-                        console.warn(`[Acumatica] Status ${res.status}. Retrying (${attempts + 1}/3) in ${wait}ms...`);
-                        await new Promise(r => setTimeout(r, wait));
-                        attempts++;
-                        continue;
-                    }
-
-                    if (!res.ok) throw new Error(`Fetch failed: ${res.status}`);
-                    
-                    const data = await res.json();
-                    const items = data.value ?? data.d?.results ?? (Array.isArray(data) ? data : []);
-                    results.push(...items);
-                    
-                    if (items.length < pageSize) {
-                        success = true;
-                        break;
-                    }
-                    
-                    success = true;
-                    // Breath between pages: 500ms (half a second) to stay under the radar
-                    await new Promise(r => setTimeout(r, 500));
-                } catch (fetchErr) {
-                    if (fetchErr.message === "Unauthorized") throw fetchErr;
-                    console.error(`[Acumatica Fetch Error] Attempt ${attempts + 1}:`, fetchErr.message);
-                    attempts++;
-                    if (attempts >= 3) throw fetchErr;
-                    await new Promise(r => setTimeout(r, 2000));
-                }
-            }
+            if (items.length < pageSize) break;
             
-            if (!success) throw new Error(`Failed to fetch page at skip ${skip} after multiple retries.`);
+            // Breath between pages: 300ms
+            await new Promise(r => setTimeout(r, 300));
             if (results.length >= 20000) break;
         }
         return results;
@@ -156,76 +165,58 @@ export const AcumaticaService = {
         const cachedCount = countCache.get(cacheKey);
         const cachedStats = statsCache.get(statsKey);
         
+        // --- STEP 1: Main Data (Sequential to avoid 401 conflicts) ---
         const dataUrl = `${ACU_BASE}/StockItem?$expand=WarehouseDetails&$select=${selectFields}&$top=${pageSize}&$skip=${skip}${filterStr}`;
-        
-        const promises = [
-            fetch(dataUrl, { headers: { Accept: "application/json", Cookie: cookie }, cache: 'no-store' })
-        ];
-
-        let statsPromiseIdx = -1;
-        let countPromiseIdx = -1;
-
-        // ONLY fetch stats if requested AND not in cache
-        if (includeStats && !cachedStats) {
-            const statsUrl = `${ACU_BASE}/StockItem?$expand=WarehouseDetails&$select=DefaultPrice,WarehouseDetails&$top=1000${filterStr}`;
-            statsPromiseIdx = promises.length;
-            promises.push(fetch(statsUrl, { headers: { Accept: "application/json", Cookie: cookie }, cache: 'no-store' }));
-        }
-
-        // ONLY fetch count if requested AND not in cache
-        if (includeCount && !cachedCount) {
-            const countUrl = `${ACU_BASE}/StockItem?$select=InventoryID&$top=10000${filterStr}`;
-            countPromiseIdx = promises.length;
-            promises.push(fetch(countUrl, { headers: { Accept: "application/json", Cookie: cookie }, cache: 'no-store' }));
-        }
-
-        const results = await Promise.all(promises);
-        const res = results[0];
-
-        if (res.status === 401) throw new Error("Unauthorized");
-        if (!res.ok) throw new Error(`Acumatica Error: ${res.status}`);
-
+        const res = await this.fetchWithRetry(dataUrl, cookie);
         const data = await res.json();
         const rawItems = data.value || (Array.isArray(data) ? data : []);
 
+        // --- STEP 2: Stats (Only if needed and sequential) ---
         let globalStats = cachedStats || { totalValue: 0, lowStock: 0, outOfStock: 0, count: 0 };
-        if (includeStats && !cachedStats && statsPromiseIdx !== -1 && results[statsPromiseIdx].ok) {
-            const sData = await results[statsPromiseIdx].json();
-            const sItems = sData.value || [];
-            
-            // Re-initialize to zero for fresh calculation
-            globalStats = { totalValue: 0, lowStock: 0, outOfStock: 0, count: 0 };
-
-            for (const item of sItems) {
-                const price = Number(item.DefaultPrice?.value ?? item.DefaultPrice ?? 0);
-                let onHand = 0;
-                const wds = item.WarehouseDetails || [];
-
-                if (branch) {
-                    const wh = wds.find(w => (w.WarehouseID?.value ?? w.WarehouseID ?? "").toString().toLowerCase() === branch.toLowerCase());
-                    onHand = Number(wh?.QtyOnHand?.value ?? wh?.QtyOnHand ?? 0);
-                } else {
-                    wds.forEach(wh => { onHand += Number(wh.QtyOnHand?.value ?? wh.QtyOnHand ?? 0); });
+        if (includeStats && !cachedStats) {
+            try {
+                const statsUrl = `${ACU_BASE}/StockItem?$expand=WarehouseDetails&$select=DefaultPrice,WarehouseDetails&$top=1000${filterStr}`;
+                const sRes = await this.fetchWithRetry(statsUrl, cookie);
+                const sData = await sRes.json();
+                const sItems = sData.value || [];
+                
+                globalStats = { totalValue: 0, lowStock: 0, outOfStock: 0, count: 0 };
+                for (const item of sItems) {
+                    const price = Number(item.DefaultPrice?.value ?? item.DefaultPrice ?? 0);
+                    let onHand = 0;
+                    const wds = item.WarehouseDetails || [];
+                    if (branch) {
+                        const wh = wds.find(w => (w.WarehouseID?.value ?? w.WarehouseID ?? "").toString().toLowerCase() === branch.toLowerCase());
+                        onHand = Number(wh?.QtyOnHand?.value ?? wh?.QtyOnHand ?? 0);
+                    } else {
+                        wds.forEach(wh => { onHand += Number(wh.QtyOnHand?.value ?? wh.QtyOnHand ?? 0); });
+                    }
+                    if (!isNaN(price) && !isNaN(onHand)) globalStats.totalValue += price * onHand;
+                    if (onHand <= 0) globalStats.outOfStock++;
+                    else if (onHand <= 10) globalStats.lowStock++;
                 }
-
-                if (!isNaN(price) && !isNaN(onHand)) globalStats.totalValue += price * onHand;
-                if (onHand <= 0) globalStats.outOfStock++;
-                else if (onHand <= 10) globalStats.lowStock++;
+                statsCache.set(statsKey, globalStats);
+            } catch (err) {
+                console.warn("[Acumatica Stats Error] Non-critical:", err.message);
             }
-            statsCache.set(statsKey, globalStats);
         }
 
+        // --- STEP 3: Count (Only if needed and sequential) ---
         let totalCount = cachedCount || 0;
-        if (includeCount && !cachedCount && countPromiseIdx !== -1 && results[countPromiseIdx].ok) {
-            const cData = await results[countPromiseIdx].json();
-            const cItems = cData.value || (Array.isArray(cData) ? cData : []);
-            totalCount = cItems.length;
-            if (totalCount > 0) countCache.set(cacheKey, totalCount);
+        if (includeCount && !cachedCount) {
+            try {
+                const countUrl = `${ACU_BASE}/StockItem?$select=InventoryID&$top=10000${filterStr}`;
+                const cRes = await this.fetchWithRetry(countUrl, cookie);
+                const cData = await cRes.json();
+                const cItems = cData.value || (Array.isArray(cData) ? cData : []);
+                totalCount = cItems.length;
+                if (totalCount > 0) countCache.set(cacheKey, totalCount);
+            } catch (err) {
+                console.warn("[Acumatica Count Error] Non-critical:", err.message);
+            }
         }
         
-        // Ensure stats object always has correct count even if not re-calculated
         if (totalCount > 0) globalStats.count = totalCount;
-
         const hasMore = totalCount > (skip + rawItems.length) || rawItems.length === pageSize;
 
         return {
@@ -244,30 +235,26 @@ export const AcumaticaService = {
         }
 
         const url = `${ACU_BASE}/Warehouse?$select=WarehouseID,Description`;
-        const res = await fetch(url, {
-            headers: { Accept: "application/json", Cookie: cookie },
-            cache: 'no-store'
-        });
+        try {
+            const res = await this.fetchWithRetry(url, cookie);
+            const data = await res.json();
+            const warehouses = data.value || (Array.isArray(data) ? data : []);
+            const result = warehouses
+                .map(w => ({ SiteID: w.WarehouseID?.value || w.WarehouseID }))
+                .filter(w => w.SiteID)
+                .sort((a, b) => a.SiteID.toString().localeCompare(b.SiteID.toString()));
 
-        if (!res.ok) {
+            branchCache.data = result;
+            branchCache.timestamp = now;
+            return result;
+        } catch (err) {
+            console.warn("[Acumatica Branch Error] Falling back to StockItem heuristic:", err.message);
             const fallbackUrl = `${ACU_BASE}/StockItem?$select=DefaultWarehouseID&$top=500`;
-            const fbRes = await fetch(fallbackUrl, { headers: { Cookie: cookie } });
-            if (!fbRes.ok) return [];
+            const fbRes = await this.fetchWithRetry(fallbackUrl, cookie);
             const fbData = await fbRes.json();
             const seen = new Set((fbData.value || []).map(i => i.DefaultWarehouseID?.value || i.DefaultWarehouseID).filter(Boolean));
             return [...seen].sort().map(id => ({ SiteID: id }));
         }
-
-        const data = await res.json();
-        const warehouses = data.value || (Array.isArray(data) ? data : []);
-        const result = warehouses
-            .map(w => ({ SiteID: w.WarehouseID?.value || w.WarehouseID }))
-            .filter(w => w.SiteID)
-            .sort((a, b) => a.SiteID.toString().localeCompare(b.SiteID.toString()));
-
-        branchCache.data = result;
-        branchCache.timestamp = now;
-        return result;
     },
 
     /** ── SALES: Get History/Analysis ── */

@@ -1448,3 +1448,75 @@
     color: #059669;
     font-weight: 600;
 }
+
+/* ── Sync Flow Visualizer ── */
+.db-sync-flow-v {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 0.4rem;
+    margin: 1.5rem 0;
+}
+
+.db-flow-node {
+    padding: 0.6rem 1rem;
+    border-radius: 10px;
+    background: #f8fafc;
+    border: 1px solid #e2e8f0;
+    font-size: 0.75rem;
+    font-weight: 700;
+    color: #94a3b8;
+    width: 240px;
+    text-align: center;
+    transition: all 0.3s ease;
+    position: relative;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+}
+
+.db-flow-node.active {
+    background: #eff6ff;
+    border-color: #3b82f6;
+    color: #2563eb;
+    box-shadow: 0 0 20px rgba(59, 130, 246, 0.15);
+    transform: scale(1.02);
+}
+
+.db-flow-node.completed {
+    background: #f0fdf4;
+    border-color: #22c55e;
+    color: #16a34a;
+}
+
+.db-flow-arrow-v {
+    color: #cbd5e1;
+    font-size: 0.9rem;
+    line-height: 1;
+    animation: db-arrow-pulse 1.5s infinite;
+}
+
+@keyframes db-arrow-pulse {
+    0%, 100% { opacity: 0.4; transform: translateY(0); }
+    50% { opacity: 1; transform: translateY(3px); }
+}
+
+.db-sync-logs {
+    background: #0f172a;
+    color: #10b981;
+    padding: 1rem;
+    border-radius: 12px;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.7rem;
+    text-align: left;
+    height: 160px;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column-reverse;
+    border: 1px solid #1e293b;
+    box-shadow: inset 0 2px 10px rgba(0,0,0,0.5);
+}
+
+.db-sync-logs div {
+    margin-bottom: 0.2rem;
+    line-height: 1.4;
+}

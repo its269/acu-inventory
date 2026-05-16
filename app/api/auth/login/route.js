@@ -5,11 +5,14 @@ export async function POST(request) {
     try {
         const { username, password, company } = await request.json();
         
-        const setCookie = await AuthService.login({ username, password, company });
+        const cookies = await AuthService.login({ username, password, company });
         
         const response = NextResponse.json({ success: true });
-        if (setCookie) {
-            response.headers.set("set-cookie", setCookie);
+        
+        if (cookies && Array.isArray(cookies)) {
+            cookies.forEach(cookie => {
+                response.headers.append("set-cookie", cookie);
+            });
         }
         
         return response;

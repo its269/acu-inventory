@@ -13,7 +13,8 @@ export const AuthService = {
             throw new Error(text);
         }
 
-        return res.headers.get("set-cookie");
+        // Return all cookies as an array
+        return res.headers.getSetCookie();
     },
 
     async logout(cookie) {

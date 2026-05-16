@@ -10,9 +10,10 @@ export async function POST(request) {
         if (!cookie) return NextResponse.json({ message: "Unauthorized" }, { status: 401 });
 
         const { searchParams } = new URL(request.url);
-        const type = searchParams.get("type") || "products"; // 'branches', 'products', or 'levels'
-        const skip = parseInt(searchParams.get("skip") || "0");
-        const limit = parseInt(searchParams.get("limit") || "100");
+        const type = searchParams.get("type") || "products"; 
+        const limit = parseInt(searchParams.get("limit") || "50");
+        const mode = searchParams.get("mode") || "full"; 
+        const lastId = searchParams.get("lastId") || ""; // Keyset pagination
 
         const ACU_BASE = "https://accounting.holocrontrackertrading.com/ERP/entity/Default/20.200.001";
 
@@ -23,20 +24,39 @@ export async function POST(request) {
                 branch_id: b.WarehouseID?.value || b.WarehouseID || b.SiteID || "",
                 branch_name: b.Description?.value || b.Description || b.SiteID || ""
             })).filter(b => b.branch_id);
-            if (branchUpserts.length > 0) await supabase.from('branches').upsert(branchUpserts);
+            
+            if (branchUpserts.length > 0) {
+                const { error: branchError } = await supabase.from('branches').upsert(branchUpserts);
+                if (branchError) throw branchError;
+            }
             return NextResponse.json({ success: true, count: branchUpserts.length });
         }
 
-        // --- PHASE B: PRODUCTS (Master List) ---
+        // --- PHASE B: PRODUCTS ---
         if (type === "products") {
-            const url = `${ACU_BASE}/StockItem?$select=InventoryID,Description,DefaultPrice,ItemClass,ItemStatus,BaseUnit&$top=${limit}&$skip=${skip}`;
-            const res = await fetch(url, { headers: { Cookie: cookie, Accept: "application/json" }, cache: 'no-store' });
-            
-            if (res.status === 429) return NextResponse.json({ message: "Rate Limited" }, { status: 429 });
-            if (!res.ok) throw new Error(`Acumatica Error: ${res.status}`);
+            const finalLimit = limit > 200 ? 200 : limit; 
+            let filters = [];
 
+            // Bypass 5000 record limit using ID comparison instead of $skip
+            if (lastId) {
+                filters.push(`InventoryID gt '${lastId.replace(/'/g, "''")}'`);
+            }
+
+            if (mode === "incremental") {
+                const { data: lastItem } = await supabase.from('products').select('last_sync').order('last_sync', { ascending: false }).limit(1).single();
+                if (lastItem?.last_sync) {
+                    const date = new Date(new Date(lastItem.last_sync).getTime() - 2 * 60 * 1000);
+                    filters.push(`LastModifiedDateTime gt datetime'${date.toISOString()}'`);
+                }
+            }
+
+            const filterStr = filters.length > 0 ? `&$filter=${filters.join(" and ")}` : "";
+            // Important: $orderby is required for Keyset pagination
+            const url = `${ACU_BASE}/StockItem?$top=${finalLimit}&$orderby=InventoryID${filterStr}`;
+            
+            const res = await AcumaticaService.fetchWithRetry(url, cookie);
             const data = await res.json();
-            const raw = data.value || [];
+            const raw = data.value || (Array.isArray(data) ? data : []);
             
             const upserts = raw.map(item => ({
                 inventory_id: item.InventoryID?.value || item.InventoryID || "",
@@ -48,22 +68,42 @@ export async function POST(request) {
                 last_sync: new Date().toISOString()
             })).filter(p => p.inventory_id);
 
-            if (upserts.length > 0) await supabase.from('products').upsert(upserts);
-            return NextResponse.json({ success: true, count: upserts.length, hasMore: raw.length === limit });
+            if (upserts.length > 0) {
+                const { error: upsertError } = await supabase.from('products').upsert(upserts);
+                if (upsertError) throw upsertError;
+            }
+
+            return NextResponse.json({ 
+                success: true, 
+                count: upserts.length, 
+                lastId: upserts[upserts.length - 1]?.inventory_id || lastId,
+                hasMore: raw.length === finalLimit
+            });
         }
 
-        // --- PHASE C: LEVELS (Stock per Branch) ---
+        // --- PHASE C: LEVELS ---
         if (type === "levels") {
-            // Increased to 50 for faster turbo sync
-            const levelLimit = 50; 
-            const url = `${ACU_BASE}/StockItem?$expand=WarehouseDetails&$select=InventoryID,WarehouseDetails/WarehouseID,WarehouseDetails/QtyOnHand,WarehouseDetails/QtyAvailable&$top=${levelLimit}&$skip=${skip}`;
-            
-            const res = await fetch(url, { headers: { Cookie: cookie, Accept: "application/json" }, cache: 'no-store' });
-            if (res.status === 429) return NextResponse.json({ message: "Rate Limited" }, { status: 429 });
-            if (!res.ok) throw new Error(`Acumatica Error: ${res.status}`);
+            const finalLimit = limit > 200 ? 200 : limit; 
+            let filters = [];
 
+            if (lastId) {
+                filters.push(`InventoryID gt '${lastId.replace(/'/g, "''")}'`);
+            }
+
+            if (mode === "incremental") {
+                const { data: lastLevel } = await supabase.from('inventory_levels').select('updated_at').order('updated_at', { ascending: false }).limit(1).single();
+                if (lastLevel?.updated_at) {
+                    const date = new Date(new Date(lastLevel.updated_at).getTime() - 2 * 60 * 1000);
+                    filters.push(`LastModifiedDateTime gt datetime'${date.toISOString()}'`);
+                }
+            }
+
+            const filterStr = filters.length > 0 ? `&$filter=${filters.join(" and ")}` : "";
+            const url = `${ACU_BASE}/StockItem?$expand=WarehouseDetails&$top=${finalLimit}&$orderby=InventoryID${filterStr}`;
+            
+            const res = await AcumaticaService.fetchWithRetry(url, cookie);
             const data = await res.json();
-            const raw = data.value || [];
+            const raw = data.value || (Array.isArray(data) ? data : []);
             
             const levelUpserts = [];
             for (const item of raw) {
@@ -89,13 +129,20 @@ export async function POST(request) {
                     await supabase.from('inventory_levels').upsert(levelUpserts.slice(i, i + chunkSize));
                 }
             }
-            return NextResponse.json({ success: true, count: raw.length, levels: levelUpserts.length, hasMore: raw.length === levelLimit });
+            return NextResponse.json({ 
+                success: true, 
+                count: raw.length, 
+                levels: levelUpserts.length, 
+                lastId: raw[raw.length - 1]?.InventoryID?.value || lastId,
+                hasMore: raw.length === finalLimit 
+            });
         }
 
         return NextResponse.json({ message: "Invalid type" }, { status: 400 });
 
     } catch (err) {
         console.error("[Sync Error]", err);
+        if (err.message.includes("Unauthorized")) return NextResponse.json({ message: "Unauthorized" }, { status: 401 });
         return NextResponse.json({ message: "Sync failed", error: err.message }, { status: 500 });
     }
 }
