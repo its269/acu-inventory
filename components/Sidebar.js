@@ -4,6 +4,7 @@ import { useState, useEffect } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import "@/styles/sidebar.css";
+import SyncModal from "./SyncModal";
 
 /* ── SVG Icons ─────────────────────────────────────────── */
 const IconInventory = () => (
@@ -34,6 +35,7 @@ export default function Sidebar() {
   const pathname = usePathname();
   const [mounted, setMounted] = useState(false);
   const [userName, setUserName] = useState("Admin User");
+  const [showSyncModal, setShowSyncModal] = useState(false);
 
   useEffect(() => {
     setMounted(true);
@@ -84,7 +86,29 @@ export default function Sidebar() {
             {item.name}
           </Link>
         ))}
+
+        <div style={{ margin: '1.5rem 0.75rem 0.5rem', borderTop: '1px solid rgba(255,255,255,0.1)', paddingTop: '1.5rem' }}>
+          <button 
+            className="sidebar-item" 
+            style={{ width: '100%', background: 'rgba(59, 130, 246, 0.1)', color: '#60a5fa', border: '1px solid rgba(59, 130, 246, 0.2)' }}
+            onClick={() => setShowSyncModal(true)}
+          >
+            <span className="sidebar-item-icon">
+              <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M21 2v6h-6" /><path d="M3 12a9 9 0 0 1 15-6.7L21 8" />
+                <path d="M3 22v-6h6" /><path d="M21 12a9 9 0 0 1-15 6.7L3 16" />
+              </svg>
+            </span>
+            Sync Data
+          </button>
+        </div>
       </nav>
+
+      <SyncModal 
+        isOpen={showSyncModal} 
+        onClose={() => setShowSyncModal(false)} 
+        onSyncComplete={() => window.location.reload()} 
+      />
 
       <div className="sidebar-footer">
         <button

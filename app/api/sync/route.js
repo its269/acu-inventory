@@ -3,146 +3,222 @@ import { supabase } from "@/lib/supabase";
 import { NextResponse } from "next/server";
 
 export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
 
 export async function POST(request) {
-    try {
-        const cookie = request.headers.get("cookie") || "";
-        if (!cookie) return NextResponse.json({ message: "Unauthorized" }, { status: 401 });
+    console.log(">>> [Sync API] Starting Final Relational Sync Process");
+    const encoder = new TextEncoder();
+    const cookie = request.headers.get("cookie") || "";
+    const signal = request.signal;
+    
+    if (!cookie) return NextResponse.json({ message: "Unauthorized" }, { status: 401 });
 
-        const { searchParams } = new URL(request.url);
-        const type = searchParams.get("type") || "products"; 
-        const limit = parseInt(searchParams.get("limit") || "50");
-        const mode = searchParams.get("mode") || "full"; 
-        const lastId = searchParams.get("lastId") || ""; // Keyset pagination
+    const { searchParams } = new URL(request.url);
+    const options = {
+        inventory: searchParams.get("inventory") === "true",
+        sales: searchParams.get("sales") === "true",
+        mode: searchParams.get("mode") || "incremental"
+    };
 
-        const ACU_BASE = "https://accounting.holocrontrackertrading.com/ERP/entity/Default/20.200.001";
+    const stream = new ReadableStream({
+        async start(controller) {
+            const send = (data) => {
+                if (signal.aborted) return;
+                controller.enqueue(encoder.encode(JSON.stringify(data) + "\n"));
+            };
 
-        // --- PHASE A: BRANCHES ---
-        if (type === "branches") {
-            const branches = await AcumaticaService.getBranches(cookie);
-            const branchUpserts = branches.map(b => ({
-                branch_id: b.WarehouseID?.value || b.WarehouseID || b.SiteID || "",
-                branch_name: b.Description?.value || b.Description || b.SiteID || ""
-            })).filter(b => b.branch_id);
-            
-            if (branchUpserts.length > 0) {
-                const { error: branchError } = await supabase.from('branches').upsert(branchUpserts);
-                if (branchError) throw branchError;
+            const delay = (ms) => new Promise(r => setTimeout(r, ms));
+
+            const getF = (obj, keyName) => {
+                if (!obj) return "";
+                const k = Object.keys(obj).find(i => i.toLowerCase() === keyName.toLowerCase());
+                if (!k) return "";
+                const val = obj[k];
+                return (val?.value !== undefined ? val.value : val) || "";
+            };
+
+            try {
+                const ACU_BASE = "https://accounting.holocrontrackertrading.com/ERP/entity/Default/20.200.001";
+                
+                // --- PHASE 0.1: FINANCIAL PERIOD MASTER ---
+                send({ section: "Sales history", details: "Loading financial calendar...", progress: 2 });
+                const periodRes = await AcumaticaService.fetchWithRetry(`${ACU_BASE}/FinancialPeriod`, cookie);
+                const periodData = await periodRes.json();
+                const rawPeriods = periodData.value || (Array.isArray(periodData) ? periodData : []);
+                const periodMap = rawPeriods.map(p => {
+                    const d = new Date(getF(p, "StartDate"));
+                    let label = getF(p, "FinancialPeriodID") || getF(p, "PeriodID");
+                    if (label && label.length >= 6) {
+                        const m = label.substring(0, 2);
+                        const y = label.substring(label.length - 4);
+                        label = (parseInt(m) <= 12) ? `${m}-${y}` : `${label.substring(4,6)}-${label.substring(0,4)}`;
+                    } else if (!label || label.length < 3) {
+                        label = `${String(d.getMonth() + 1).padStart(2, '0')}-${d.getFullYear()}`;
+                    }
+                    return { start: d, label };
+                }).filter(p => !isNaN(p.start.getTime())).sort((a, b) => b.start - a.start);
+
+                const getPeriodForDate = (dateStr) => {
+                    if (!dateStr) return "";
+                    const d = new Date(dateStr);
+                    const match = periodMap.find(p => p.start <= d);
+                    return match ? match.label : "";
+                };
+
+                // --- PHASE 0.2: ITEM CLASS MASTER (Source for PostingClass) ---
+                send({ section: "Inventory", details: "Mapping item categories...", progress: 4 });
+                const icRes = await AcumaticaService.fetchWithRetry(`${ACU_BASE}/ItemClass`, cookie);
+                const icData = await icRes.json();
+                const icMap = new Map((icData.value || (Array.isArray(icData) ? icData : [])).map(ic => [
+                    getF(ic, "ClassID").toUpperCase().trim(),
+                    getF(ic, "PostingClass").toString().trim()
+                ]));
+                console.log(`>>> [Sync] Master Map Ready: ${icMap.size} Item Classes linked to PostingClasses.`);
+
+                // --- PHASE 1: INVENTORY (Total Branches + Products + Levels) ---
+                if (options.inventory) {
+                    send({ section: "Inventory", details: "Updating branch list...", progress: 6 });
+                    const whRes = await AcumaticaService.fetchWithRetry(`${ACU_BASE}/Warehouse`, cookie);
+                    const whData = await whRes.json();
+                    const rawWh = whData.value || (Array.isArray(whData) ? whData : []);
+                    const branches = rawWh.map(w => ({
+                        branch_id: getF(w, "WarehouseID").toString().trim(),
+                        branch_name: getF(w, "Description").toString().trim() || getF(w, "WarehouseID")
+                    })).filter(b => b.branch_id);
+                    if (branches.length > 0) await supabase.from('branches').upsert(branches);
+
+                    send({ section: "Inventory", details: "Updating product catalog...", progress: 10 });
+                    let pSkip = 0, pTotal = 0, pHasMore = true;
+                    while (pHasMore && !signal.aborted) {
+                        const res = await AcumaticaService.fetchWithRetry(`${ACU_BASE}/StockItem?$top=100&$skip=${pSkip}`, cookie);
+                        const data = await res.json();
+                        const raw = data.value || [];
+                        const upserts = raw.map(item => {
+                            const invId = getF(item, "InventoryID").toString().trim();
+                            const itemClass = getF(item, "ItemClass").toString().trim();
+                            if (!invId) return null;
+                            return {
+                                inventory_id: invId,
+                                description: getF(item, "Description").toString().trim(),
+                                item_class: itemClass,
+                                posting_class: icMap.get(itemClass.toUpperCase()) || "",
+                                default_price: Number(getF(item, "DefaultPrice") || 0),
+                                item_status: getF(item, "ItemStatus") || "Active",
+                                base_unit: getF(item, "BaseUnit") || "",
+                                last_sync: new Date().toISOString()
+                            };
+                        }).filter(Boolean);
+                        if (upserts.length > 0) await supabase.from('products').upsert(upserts);
+                        pTotal += upserts.length;
+                        pSkip += raw.length;
+                        pHasMore = raw.length === 100 && (options.mode === 'full' || pSkip < 500);
+                        send({ section: "Inventory", details: `Catalog: ${pTotal} products...`, progress: Math.min(45, 10 + Math.floor(pSkip / 15)) });
+                        await delay(300);
+                    }
+
+                    send({ section: "Inventory", details: "Syncing stock levels for ALL branches...", progress: 45 });
+                    let lSkip = 0, lTotal = 0, lHasMore = true;
+                    while (lHasMore && !signal.aborted) {
+                        const res = await AcumaticaService.fetchWithRetry(`${ACU_BASE}/StockItem?$expand=WarehouseDetails&$top=40&$skip=${lSkip}`, cookie);
+                        const data = await res.json();
+                        const raw = data.value || [];
+                        const levels = [];
+                        const discoveredBranches = [];
+                        for (const item of raw) {
+                            const invId = getF(item, "InventoryID").toString().trim();
+                            const wds = item.WarehouseDetails || [];
+                            for (const wh of wds) {
+                                const whId = getF(wh, "WarehouseID").toString().trim();
+                                if (!whId) continue;
+                                levels.push({
+                                    inventory_id: invId, branch_id: whId, site_id: whId,
+                                    on_hand: Number(getF(wh, "QtyOnHand") || 0),
+                                    available: Number(getF(wh, "QtyAvailable") || 0),
+                                    updated_at: new Date().toISOString()
+                                });
+                                discoveredBranches.push({ branch_id: whId, branch_name: whId });
+                            }
+                        }
+                        if (levels.length > 0) {
+                            await supabase.from('inventory_levels').upsert(levels);
+                            await supabase.from('branches').upsert(discoveredBranches, { onConflict: 'branch_id', ignoreDuplicates: true });
+                            lTotal += levels.length;
+                        }
+                        lSkip += raw.length;
+                        lHasMore = raw.length === 40 && (options.mode === 'full' || lSkip < 200);
+                        send({ section: "Inventory", details: `Stock levels: ${lTotal}...`, progress: Math.min(98, 45 + Math.floor(lSkip / 10)) });
+                        await delay(300);
+                    }
+                    send({ section: "Inventory", status: "done", details: "Inventory complete!", progress: 100 });
+                }
+
+                // --- PHASE 2: SALES HISTORY ---
+                if (options.sales && !signal.aborted) {
+                    send({ section: "Sales history", status: "syncing", details: "Mapping relational data...", progress: 2 });
+                    const [{ data: catalog }, { data: branchList }] = await Promise.all([
+                        supabase.from('products').select('*'),
+                        supabase.from('branches').select('*')
+                    ]);
+                    const productMap = new Map((catalog || []).map(p => [p.inventory_id.toUpperCase().trim(), p]));
+                    const branchMap = new Map((branchList || []).map(b => [b.branch_id.toUpperCase().trim(), b.branch_name]));
+
+                    send({ section: "Sales history", details: "Fetching latest records...", progress: 5 });
+                    let sSkip = 0, sTotal = 0, sHasMore = true;
+                    while (sHasMore && !signal.aborted) {
+                        const url = `${ACU_BASE}/SalesInvoice?$expand=Details&$top=40&$skip=${sSkip}`;
+                        const res = await AcumaticaService.fetchWithRetry(url, cookie);
+                        const data = await res.json();
+                        let invoices = data.value || (Array.isArray(data) ? data : []);
+                        if (invoices.length === 0) { sHasMore = false; break; }
+
+                        const sUpserts = [];
+                        for (const inv of invoices) {
+                            const date = getF(inv, "Date");
+                            const period = getF(inv, "FinancialPeriod") || getF(inv, "PostPeriod") || getPeriodForDate(date);
+                            const hBranch = getF(inv, "BranchID") || getF(inv, "Branch") || "";
+
+                            for (const line of (inv.Details || [])) {
+                                const invIdRaw = getF(line, "InventoryID").toString().trim();
+                                if (!invIdRaw) continue;
+                                const p = productMap.get(invIdRaw.toUpperCase());
+                                const bId = (getF(line, "BranchID") || getF(line, "WarehouseID") || hBranch).toString().trim();
+                                
+                                sUpserts.push({
+                                    branch_name: bId, // Storing ID directly for consistency
+                                    order_type: getF(inv, "Type") || "Invoice",
+                                    financial_period: period,
+                                    document_date: date || null,
+                                    description: p?.description || getF(line, "TransactionDescr") || getF(line, "Description") || "",
+                                    qty: Number(getF(line, "Qty") || 0),
+                                    total_amount: Number(getF(line, "Amount") || 0),
+                                    inventory_id: invIdRaw,
+                                    item_class: p?.item_class || "",
+                                    posting_class: p?.posting_class || "",
+                                    last_sync: new Date().toISOString()
+                                });
+                            }
+                        }
+                        if (sUpserts.length > 0) {
+                            await supabase.from('product_periodic_sales').upsert(sUpserts);
+                            sTotal += sUpserts.length;
+                        }
+                        sSkip += invoices.length;
+                        sHasMore = invoices.length === 40 && sSkip < 1200;
+                        send({ section: "Sales history", details: `Synced ${sTotal} records...`, progress: Math.min(99, 5 + Math.floor(sSkip / 12)) });
+                        await delay(400);
+                    }
+                    send({ section: "Sales history", status: "done", details: "Sales History Updated!", progress: 100 });
+                }
+
+                send({ status: "complete", message: "Sync completed successfully" });
+                controller.close();
+            } catch (err) {
+                console.error(">>> [Sync Error]", err);
+                send({ status: "error", message: err.message });
+                try { controller.close(); } catch(e) {}
             }
-            return NextResponse.json({ success: true, count: branchUpserts.length });
         }
+    });
 
-        // --- PHASE B: PRODUCTS ---
-        if (type === "products") {
-            const finalLimit = limit > 200 ? 200 : limit; 
-            let filters = [];
-
-            // Bypass 5000 record limit using ID comparison instead of $skip
-            if (lastId) {
-                filters.push(`InventoryID gt '${lastId.replace(/'/g, "''")}'`);
-            }
-
-            if (mode === "incremental") {
-                const { data: lastItem } = await supabase.from('products').select('last_sync').order('last_sync', { ascending: false }).limit(1).single();
-                if (lastItem?.last_sync) {
-                    const date = new Date(new Date(lastItem.last_sync).getTime() - 2 * 60 * 1000);
-                    filters.push(`LastModifiedDateTime gt datetime'${date.toISOString()}'`);
-                }
-            }
-
-            const filterStr = filters.length > 0 ? `&$filter=${filters.join(" and ")}` : "";
-            // Important: $orderby is required for Keyset pagination
-            const url = `${ACU_BASE}/StockItem?$top=${finalLimit}&$orderby=InventoryID${filterStr}`;
-            
-            const res = await AcumaticaService.fetchWithRetry(url, cookie);
-            const data = await res.json();
-            const raw = data.value || (Array.isArray(data) ? data : []);
-            
-            const upserts = raw.map(item => ({
-                inventory_id: item.InventoryID?.value || item.InventoryID || "",
-                description: item.Description?.value || item.Description || "",
-                item_class: item.ItemClass?.value || "",
-                default_price: Number(item.DefaultPrice?.value ?? 0),
-                item_status: item.ItemStatus?.value || "Active",
-                base_unit: item.BaseUnit?.value || "",
-                last_sync: new Date().toISOString()
-            })).filter(p => p.inventory_id);
-
-            if (upserts.length > 0) {
-                const { error: upsertError } = await supabase.from('products').upsert(upserts);
-                if (upsertError) throw upsertError;
-            }
-
-            return NextResponse.json({ 
-                success: true, 
-                count: upserts.length, 
-                lastId: upserts[upserts.length - 1]?.inventory_id || lastId,
-                hasMore: raw.length === finalLimit
-            });
-        }
-
-        // --- PHASE C: LEVELS ---
-        if (type === "levels") {
-            const finalLimit = limit > 200 ? 200 : limit; 
-            let filters = [];
-
-            if (lastId) {
-                filters.push(`InventoryID gt '${lastId.replace(/'/g, "''")}'`);
-            }
-
-            if (mode === "incremental") {
-                const { data: lastLevel } = await supabase.from('inventory_levels').select('updated_at').order('updated_at', { ascending: false }).limit(1).single();
-                if (lastLevel?.updated_at) {
-                    const date = new Date(new Date(lastLevel.updated_at).getTime() - 2 * 60 * 1000);
-                    filters.push(`LastModifiedDateTime gt datetime'${date.toISOString()}'`);
-                }
-            }
-
-            const filterStr = filters.length > 0 ? `&$filter=${filters.join(" and ")}` : "";
-            const url = `${ACU_BASE}/StockItem?$expand=WarehouseDetails&$top=${finalLimit}&$orderby=InventoryID${filterStr}`;
-            
-            const res = await AcumaticaService.fetchWithRetry(url, cookie);
-            const data = await res.json();
-            const raw = data.value || (Array.isArray(data) ? data : []);
-            
-            const levelUpserts = [];
-            for (const item of raw) {
-                const invId = item.InventoryID?.value || item.InventoryID || "";
-                const wds = item.WarehouseDetails || [];
-                for (const wh of wds) {
-                    const whId = (wh.WarehouseID?.value || wh.WarehouseID || "").toString();
-                    if (!whId) continue;
-                    levelUpserts.push({
-                        inventory_id: invId,
-                        branch_id: whId,
-                        site_id: whId,
-                        on_hand: Number(wh.QtyOnHand?.value ?? 0),
-                        available: Number(wh.QtyAvailable?.value ?? 0),
-                        updated_at: new Date().toISOString()
-                    });
-                }
-            }
-
-            if (levelUpserts.length > 0) {
-                const chunkSize = 500;
-                for (let i = 0; i < levelUpserts.length; i += chunkSize) {
-                    await supabase.from('inventory_levels').upsert(levelUpserts.slice(i, i + chunkSize));
-                }
-            }
-            return NextResponse.json({ 
-                success: true, 
-                count: raw.length, 
-                levels: levelUpserts.length, 
-                lastId: raw[raw.length - 1]?.InventoryID?.value || lastId,
-                hasMore: raw.length === finalLimit 
-            });
-        }
-
-        return NextResponse.json({ message: "Invalid type" }, { status: 400 });
-
-    } catch (err) {
-        console.error("[Sync Error]", err);
-        if (err.message.includes("Unauthorized")) return NextResponse.json({ message: "Unauthorized" }, { status: 401 });
-        return NextResponse.json({ message: "Sync failed", error: err.message }, { status: 500 });
-    }
+    return new Response(stream, { headers: { "Content-Type": "text/event-stream", "Cache-Control": "no-cache" } });
 }
