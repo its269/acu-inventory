@@ -98,7 +98,7 @@ const InventoryRow = memo(({ row, index }) => {
     const available = Number(row.Available?.value) || 0;
     const status = getStatus(onHand);
     const price = Number(row.DefaultPrice?.value) || 0;
-    
+
     return (
         <tr className={status === "LOW_STOCK" ? "db-row-warn" : status === "OUT_OF_STOCK" ? "db-row-danger" : ""}>
             <td className="db-row-num">{index}</td>
@@ -179,23 +179,23 @@ export default function DashboardPage() {
     /* ── Sync Data — Sequential & Safe ───────────────── */
     const startSync = useCallback(async (mode = "full", actualTotal) => {
         if (syncingRef.current) return;
-        
+
         setShowSyncConfirm(false);
         setSyncing(true);
         syncingRef.current = true;
         setSyncLogs([]);
-        
+
         let totalItems = actualTotal || 27881;
         // Match user request: Display only the actual count from Acumatica
         let totalWork = totalItems;
         const isFull = mode === "full";
-        
+
         const log = (msg) => setSyncLogs(prev => [msg, ...prev].slice(0, 15));
 
-        setSyncProgress({ 
-            current: 0, 
-            total: totalWork, 
-            stage: `Phase 0: Initializing ${isFull ? "Full" : "Quick"} Sync...` 
+        setSyncProgress({
+            current: 0,
+            total: totalWork,
+            stage: `Phase 0: Initializing ${isFull ? "Full" : "Quick"} Sync...`
         });
         log(`--- Initializing ${isFull ? "FULL" : "QUICK"} Sync ---`);
 
@@ -206,7 +206,7 @@ export default function DashboardPage() {
                 setSyncProgress(p => ({ ...p, stage: "Phase 1: Syncing Branches..." }));
                 log("Fetching branches from Acumatica...");
                 const bRes = await fetch("/api/sync?type=branches", { method: "POST" });
-                
+
                 if (bRes.status === 401) { router.push("/signin"); return; }
                 if (!bRes.ok) throw new Error("Branch sync failed.");
                 log("Branches synced successfully.");
@@ -214,7 +214,7 @@ export default function DashboardPage() {
             }
 
             // Sync Products (Phase 1)
-            const prodLimit = 200; 
+            const prodLimit = 200;
             const prodTotalEstimate = 4700; // Standard count of unique products
             let prodProcessed = 0;
             let prodHasMore = true;
@@ -222,16 +222,16 @@ export default function DashboardPage() {
             let prodBatchCount = 0;
 
             while (prodHasMore) {
-                setSyncProgress({ 
-                    current: prodProcessed, 
-                    total: prodTotalEstimate, 
-                    stage: `${isFull ? "Phase 2" : "Phase 1"}: Products (${prodProcessed.toLocaleString()} / ${prodTotalEstimate.toLocaleString()})` 
+                setSyncProgress({
+                    current: prodProcessed,
+                    total: prodTotalEstimate,
+                    stage: `${isFull ? "Phase 2" : "Phase 1"}: Products (${prodProcessed.toLocaleString()} / ${prodTotalEstimate.toLocaleString()})`
                 });
-                
+
                 const res = await fetch(`/api/sync?type=products&limit=${prodLimit}&mode=${isFull ? "full" : "incremental"}&lastId=${encodeURIComponent(lastProdId)}`, { method: "POST" });
                 if (res.status === 401) { router.push("/signin"); return; }
                 if (!res.ok) throw new Error(`Product sync failed: ${res.status}`);
-                
+
                 const data = await res.json();
                 prodHasMore = data.hasMore;
                 prodProcessed += (data.count || 0);
@@ -239,7 +239,7 @@ export default function DashboardPage() {
                 prodBatchCount++;
 
                 log(`Synced ${data.count} items. Last ID: ${lastProdId || "..."}`);
-                
+
                 // Refresh UI after first batch and every 5 batches
                 if (prodBatchCount === 1 || prodBatchCount % 5 === 0) {
                     fetchInventory();
@@ -247,21 +247,21 @@ export default function DashboardPage() {
 
                 if (!isFull && data.count === 0) break;
                 if (data.count === 0 && prodHasMore) break;
-                await new Promise(r => setTimeout(r, 150)); 
+                await new Promise(r => setTimeout(r, 150));
             }
 
             // Sync Levels (Phase 2)
-            const levelLimit = 50; 
+            const levelLimit = 50;
             let levelProcessed = 0;
             let levelHasMore = true;
             let lastLevelId = "";
             let levelBatchCount = 0;
 
             while (levelHasMore && levelProcessed < totalItems) {
-                setSyncProgress({ 
-                    current: levelProcessed, 
-                    total: totalItems, 
-                    stage: `${isFull ? "Phase 3" : "Phase 2"}: Stock Levels (${levelProcessed.toLocaleString()} / ${totalItems.toLocaleString()})` 
+                setSyncProgress({
+                    current: levelProcessed,
+                    total: totalItems,
+                    stage: `${isFull ? "Phase 3" : "Phase 2"}: Stock Levels (${levelProcessed.toLocaleString()} / ${totalItems.toLocaleString()})`
                 });
 
                 const res = await fetch(`/api/sync?type=levels&limit=${levelLimit}&mode=${isFull ? "full" : "incremental"}&lastId=${encodeURIComponent(lastLevelId)}`, { method: "POST" });
@@ -273,7 +273,7 @@ export default function DashboardPage() {
                 levelProcessed += (data.count || 0);
                 lastLevelId = data.lastId || "";
                 levelBatchCount++;
-                
+
                 log(`Synced stock for ${data.count} items (${data.levels} locations)`);
 
                 // Refresh UI after first batch and every 5 batches of levels
@@ -289,9 +289,9 @@ export default function DashboardPage() {
             const duration = ((Date.now() - startTime) / 1000 / 60).toFixed(1);
             log(`--- Sync Complete in ${duration} min ---`);
             alert(`${isFull ? "Full" : "Quick"} Sync Complete! Total time: ${duration} minutes.`);
-            
+
             syncingRef.current = false;
-            fetchInventory(); 
+            fetchInventory();
 
         } catch (err) {
             console.error("Sync error:", err);
@@ -318,13 +318,13 @@ export default function DashboardPage() {
         fetch("/api/inventory?count=true&pageSize=1&source=supabase")
             .then(r => r.json())
             .then(data => { if (data.totalCount) setSyncProgress(p => ({ ...p, total: data.totalCount })); })
-            .catch(() => {});
+            .catch(() => { });
         setShowSyncConfirm(true);
     }, []);
 
     const initials = useMemo(() => {
         const parts = userName.split(" ");
-        if (parts.length >= 2) return (parts[0][0] + parts[parts.length-1][0]).toUpperCase();
+        if (parts.length >= 2) return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
         return userName.slice(0, 2).toUpperCase();
     }, [userName]);
 
@@ -340,7 +340,7 @@ export default function DashboardPage() {
                             {syncProgress.stage.includes("Full") ? "Full Syncing..." : "Quick Syncing..."}
                         </h3>
                         <p style={{ color: '#64748b', fontSize: '0.9rem', marginBottom: '1.5rem' }}>{syncProgress.stage.split(":")[1] || syncProgress.stage}</p>
-                        
+
                         <div className="db-progress-container" style={{ height: '8px', borderRadius: '4px', background: '#f1f5f9' }}>
                             <div className="db-progress-bar" style={{ width: `${Math.min(100, (syncProgress.current / syncProgress.total) * 100)}%`, borderRadius: '4px' }} />
                         </div>
@@ -361,10 +361,10 @@ export default function DashboardPage() {
                         </div>
                         <div className="db-modal-body" style={{ padding: '2rem' }}>
                             <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
-                                <div style={{ 
-                                    padding: '1.25rem', 
-                                    background: '#eff6ff', 
-                                    border: '1px solid #bfdbfe', 
+                                <div style={{
+                                    padding: '1.25rem',
+                                    background: '#eff6ff',
+                                    border: '1px solid #bfdbfe',
                                     borderRadius: '12px',
                                     display: 'flex',
                                     gap: '1rem'
@@ -378,10 +378,10 @@ export default function DashboardPage() {
                                     </div>
                                 </div>
 
-                                <div style={{ 
-                                    padding: '1.25rem', 
-                                    background: '#f8fafc', 
-                                    border: '1px solid #e2e8f0', 
+                                <div style={{
+                                    padding: '1.25rem',
+                                    background: '#f8fafc',
+                                    border: '1px solid #e2e8f0',
                                     borderRadius: '12px',
                                     display: 'flex',
                                     gap: '1rem'
@@ -406,24 +406,6 @@ export default function DashboardPage() {
             )}
 
             <main className="db-main" style={{ maxWidth: '1400px' }}>
-                {/* Original working design: User chip instead of header */}
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '2rem' }}>
-                    <div className="db-logo" style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
-                        <div className="db-user-avatar" style={{ background: '#0f172a', width: '40px', height: '40px' }}><IconBox /></div>
-                        <div>
-                            <div style={{ fontSize: '1.25rem', fontWeight: '800', color: '#0f172a', lineHeight: '1.1' }}>ACU</div>
-                            <div style={{ fontSize: '0.75rem', fontWeight: '600', color: '#64748b' }}>Inventory</div>
-                        </div>
-                    </div>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
-                        <div className="db-user-chip">
-                            <div className="db-user-avatar">{initials}</div>
-                            <span className="db-user-name">{userName}</span>
-                        </div>
-                        <button className="db-refresh-btn" style={{ padding: '0.5rem', width: '40px' }} onClick={() => router.push("/signin")}><IconLogout /></button>
-                    </div>
-                </div>
-
                 <div className="db-page-title">
                     <h1>Inventory Dashboard</h1>
                     <p>Manage and monitor stock levels across all locations.</p>

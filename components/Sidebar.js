@@ -89,10 +89,11 @@ export default function Sidebar() {
       <div className="sidebar-footer">
         <button
           className="sidebar-logout"
-          onClick={() => {
+          onClick={async () => {
             localStorage.removeItem("userName");
             localStorage.removeItem("userFirstName");
             localStorage.removeItem("userLastName");
+            await fetch("/api/auth/logout", { method: "POST" });
             window.location.href = "/signin";
           }}
         >
