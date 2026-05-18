@@ -10,9 +10,6 @@ const branchCache = {
     timestamp: 0
 };
 
-// Helper for delays
-const sleep = (ms) => new Promise(res => setTimeout(ms, res));
-
 /**
  * Service for interacting with Acumatica ERP.
  * This acts as the core of our BFF (Backend-for-Frontend) layer.
@@ -22,7 +19,7 @@ export const AcumaticaService = {
     async fetchWithRetry(url, cookie, options = {}) {
         let lastError = null;
         const maxAttempts = 3;
-        
+
         for (let attempts = 1; attempts <= maxAttempts; attempts++) {
             try {
                 // Mimic browser headers to avoid being blocked by ERP security rules
@@ -44,8 +41,8 @@ export const AcumaticaService = {
 
                 if (res.status === 429 || res.status === 500 || res.status === 503) {
                     const errorText = await res.text().catch(() => "No error body");
-                    console.warn(`[Acumatica] Status ${res.status}. Retry ${attempts}/${maxAttempts}. Body: ${errorText.substring(0, 100)}`);
-                    await new Promise(r => setTimeout(r, 2000 * attempts)); // Faster retry for 429
+                    console.warn(`[Acumatica] Status ${res.status}. Retry ${attempts}/${maxAttempts}. Body: ${errorText.substring(0, 100)}`);      
+                    await new Promise(r => setTimeout(r, 2000 * attempts)); 
                     lastError = new Error(`Acumatica Error: ${res.status}`);
                     continue;
                 }
@@ -71,28 +68,23 @@ export const AcumaticaService = {
         for (let skip = 0; skip < 20000; skip += pageSize) {
             const sep = url.includes("?") ? "&" : "?";
             const fullUrl = `${url}${sep}$top=${pageSize}&$skip=${skip}`;
-            
+
             const res = await this.fetchWithRetry(fullUrl, cookie);
             const data = await res.json();
             const items = data.value ?? data.d?.results ?? (Array.isArray(data) ? data : []);
             results.push(...items);
-            
+
             if (items.length < pageSize) break;
-            
-            // Breath between pages: 300ms
+
             await new Promise(r => setTimeout(r, 300));
             if (results.length >= 20000) break;
         }
         return results;
     },
 
-    /** ── INVENTORY: Transform StockItem ── 
-     * Ensures all fields are flattened into the same structure { value: ... } 
-     * to prevent React "Objects are not valid as child" errors.
-     */
+    /** ── INVENTORY: Transform StockItem ── */
     transformStockItem(item, selectedBranch = "") {
         const wds = item.WarehouseDetails || [];
-        
         let onHand = 0;
         let available = 0;
         let availForShip = 0;
@@ -104,7 +96,7 @@ export const AcumaticaService = {
                 const whId = (w.WarehouseID?.value ?? w.WarehouseID ?? "").toString().toLowerCase();
                 return whId === selectedBranch.toLowerCase();
             });
-            
+
             if (wh) {
                 onHand = Number(wh.QtyOnHand?.value ?? wh.QtyOnHand ?? 0);
                 available = Number(wh.QtyAvailable?.value ?? 0);
@@ -128,8 +120,6 @@ export const AcumaticaService = {
             }
         }
 
-        // BFF Transformation Rule: Everything must be wrapped in { value: ... }
-        // This ensures the cellVal() helper in the UI works consistently.
         return {
             InventoryID: { value: item.InventoryID?.value ?? item.InventoryID ?? "" },
             Description: { value: item.Description?.value ?? item.Description ?? "" },
@@ -149,7 +139,7 @@ export const AcumaticaService = {
         const cacheKey = `count-${search}-${branch}`;
         const statsKey = `stats-${search}-${branch}`;
         let filterParts = [];
-        
+
         if (search) {
             const s = search.replace(/'/g, "''");
             filterParts.push(`(substringof('${s}', InventoryID/Value) or substringof('${s}', Description/Value))`);
@@ -161,32 +151,30 @@ export const AcumaticaService = {
 
         const filterStr = filterParts.length > 0 ? `&$filter=${filterParts.join(" and ")}` : "";
         const selectFields = "InventoryID,Description,DefaultWarehouseID,DefaultPrice,ItemClass";
-        
+
         const cachedCount = countCache.get(cacheKey);
         const cachedStats = statsCache.get(statsKey);
-        
-        // --- STEP 1: Main Data (Sequential to avoid 401 conflicts) ---
-        const dataUrl = `${ACU_BASE}/StockItem?$expand=WarehouseDetails&$select=${selectFields}&$top=${pageSize}&$skip=${skip}${filterStr}`;
+
+        const dataUrl = `${ACU_BASE}/StockItem?$expand=WarehouseDetails&$select=${selectFields}&$top=${pageSize}&$skip=${skip}${filterStr}`;       
         const res = await this.fetchWithRetry(dataUrl, cookie);
         const data = await res.json();
         const rawItems = data.value || (Array.isArray(data) ? data : []);
 
-        // --- STEP 2: Stats (Only if needed and sequential) ---
         let globalStats = cachedStats || { totalValue: 0, lowStock: 0, outOfStock: 0, count: 0 };
         if (includeStats && !cachedStats) {
             try {
-                const statsUrl = `${ACU_BASE}/StockItem?$expand=WarehouseDetails&$select=DefaultPrice,WarehouseDetails&$top=1000${filterStr}`;
+                const statsUrl = `${ACU_BASE}/StockItem?$expand=WarehouseDetails&$select=DefaultPrice,WarehouseDetails&$top=1000${filterStr}`;     
                 const sRes = await this.fetchWithRetry(statsUrl, cookie);
                 const sData = await sRes.json();
                 const sItems = sData.value || [];
-                
+
                 globalStats = { totalValue: 0, lowStock: 0, outOfStock: 0, count: 0 };
                 for (const item of sItems) {
                     const price = Number(item.DefaultPrice?.value ?? item.DefaultPrice ?? 0);
                     let onHand = 0;
                     const wds = item.WarehouseDetails || [];
                     if (branch) {
-                        const wh = wds.find(w => (w.WarehouseID?.value ?? w.WarehouseID ?? "").toString().toLowerCase() === branch.toLowerCase());
+                        const wh = wds.find(w => (w.WarehouseID?.value ?? w.WarehouseID ?? "").toString().toLowerCase() === branch.toLowerCase()); 
                         onHand = Number(wh?.QtyOnHand?.value ?? wh?.QtyOnHand ?? 0);
                     } else {
                         wds.forEach(wh => { onHand += Number(wh.QtyOnHand?.value ?? wh.QtyOnHand ?? 0); });
@@ -201,7 +189,6 @@ export const AcumaticaService = {
             }
         }
 
-        // --- STEP 3: Count (Only if needed and sequential) ---
         let totalCount = cachedCount || 0;
         if (includeCount && !cachedCount) {
             try {
@@ -215,7 +202,7 @@ export const AcumaticaService = {
                 console.warn("[Acumatica Count Error] Non-critical:", err.message);
             }
         }
-        
+
         if (totalCount > 0) globalStats.count = totalCount;
         const hasMore = totalCount > (skip + rawItems.length) || rawItems.length === pageSize;
 
@@ -240,7 +227,10 @@ export const AcumaticaService = {
             const data = await res.json();
             const warehouses = data.value || (Array.isArray(data) ? data : []);
             const result = warehouses
-                .map(w => ({ SiteID: w.WarehouseID?.value || w.WarehouseID }))
+                .map(w => ({ 
+                    SiteID: w.WarehouseID?.value || w.WarehouseID,
+                    Description: w.Description?.value || w.Description || ""
+                }))
                 .filter(w => w.SiteID)
                 .sort((a, b) => a.SiteID.toString().localeCompare(b.SiteID.toString()));
 
@@ -264,13 +254,13 @@ export const AcumaticaService = {
         const end = endDate ? new Date(endDate) : new Date();
         const days = Math.max(1, Math.round((end - start) / (1000 * 60 * 60 * 24)));
 
-        let invUrl = `${ACU_BASE}/StockItem?$select=InventoryID,Description,ItemClass,PostingClass,DefaultWarehouseID&$expand=WarehouseDetails`;
+        let invUrl = `${ACU_BASE}/StockItem?$select=InventoryID,Description,ItemClass,PostingClass,DefaultWarehouseID&$expand=WarehouseDetails`;   
         if (branch) invUrl += `&$filter=DefaultWarehouseID eq '${branch.replace(/'/g, "''")}'`;
         const inventory = await this.fetchAllPages(invUrl, cookie, 200);
 
         const salesUrl = `${ACU_BASE}/InventoryTransaction?$filter=Date ge datetime'${toISODate(start)}T00:00:00' and Date le datetime'${toISODate(end)}T23:59:59'&$select=InventoryID,Qty`;
         const salesData = await this.fetchAllPages(salesUrl, cookie, 500);
-        
+
         const salesMap = new Map();
         for (const s of salesData) {
             const id = (s.InventoryID?.value || s.InventoryID || "").toString();
@@ -304,9 +294,7 @@ export const AcumaticaService = {
 
     /** ── PERIODIC SALES: Get Data from GI640113 ── */
     async getPeriodicSales({ cookie, branch, startDate, endDate, top = 1000, skip = 0 }) {
-        // GI endpoints are often at the root of the Default endpoint if published
         let url = `${ACU_BASE}/GI640113?$top=${top}&$skip=${skip}`;
-        
         let filterParts = [];
         if (startDate) filterParts.push(`DocumentDate ge datetime'${startDate}T00:00:00'`);
         if (endDate) filterParts.push(`DocumentDate le datetime'${endDate}T23:59:59'`);

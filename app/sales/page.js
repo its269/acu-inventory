@@ -49,7 +49,6 @@ export default function SalesPage() {
     /* ── State ──────────────────────────────────────────── */
     const [branchOptions, setBranchOptions] = useState([]);
     const [selectedBranch, setSelectedBranch] = useState("");
-
     const [salesData, setSalesData] = useState([]);
     const [months, setMonths] = useState([]);
     const [loading, setLoading] = useState(false);

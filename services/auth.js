@@ -1,10 +1,16 @@
 const AUTH_URL = "https://accounting.holocrontrackertrading.com/ERP/entity/auth/login";
+const COMMON_HEADERS = {
+    "Accept": "application/json",
+    "Content-Type": "application/json",
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+    "X-Requested-With": "XMLHttpRequest"
+};
 
 export const AuthService = {
     async login({ username, password, company }) {
         const res = await fetch(AUTH_URL, {
             method: "POST",
-            headers: { "Content-Type": "application/json" },
+            headers: COMMON_HEADERS,
             body: JSON.stringify({ name: username, password, company }),
         });
 
@@ -13,13 +19,10 @@ export const AuthService = {
             throw new Error(text);
         }
 
-        // Return all cookies as an array
         return res.headers.getSetCookie();
     },
 
     async logout(cookie) {
-        // Acumatica doesn't always need a server-side logout if session is short,
-        // but we can add it here if needed.
         return true;
     },
 
@@ -28,7 +31,7 @@ export const AuthService = {
         const url = `https://accounting.holocrontrackertrading.com/ERP/entity/Default/20.200.001/Users?$filter=Username eq '${safeUsername}'&$select=Username,FirstName,LastName&$top=1`;
 
         const res = await fetch(url, {
-            headers: { "Content-Type": "application/json", Accept: "application/json", Cookie: cookie },
+            headers: { ...COMMON_HEADERS, Cookie: cookie },
         });
 
         if (!res.ok) return { fullName: username };
