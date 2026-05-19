@@ -214,6 +214,23 @@ export const AcumaticaService = {
         };
     },
 
+    /** ── BRANCHES: Get Actual Branch IDs ── */
+    async getRealBranches(cookie) {
+        const url = `${ACU_BASE}/Branch?$select=BranchID,Description`;
+        try {
+            const res = await this.fetchWithRetry(url, cookie);
+            const data = await res.json();
+            const branches = data.value || (Array.isArray(data) ? data : []);
+            return branches.map(b => ({
+                BranchID: b.BranchID?.value || b.BranchID,
+                Description: b.Description?.value || b.Description || ""
+            })).filter(b => b.BranchID);
+        } catch (err) {
+            console.warn("[Acumatica Real Branch Error]", err.message);
+            return [];
+        }
+    },
+
     /** ── BRANCHES: Get Site IDs / Warehouses ── */
     async getBranches(cookie) {
         const now = Date.now();
