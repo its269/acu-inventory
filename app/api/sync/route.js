@@ -78,14 +78,14 @@ export async function POST(request) {
                 // --- PHASE 1: INVENTORY (Total Branches + Products + Levels) ---
                 if (options.inventory) {
                     send({ section: "Inventory", details: "Updating branch list...", progress: 6 });
-                    const whRes = await AcumaticaService.fetchWithRetry(`${ACU_BASE}/Warehouse`, cookie);
-                    const whData = await whRes.json();
-                    const rawWh = whData.value || (Array.isArray(whData) ? whData : []);
-                    const branches = rawWh.map(w => ({
-                        branch_id: getF(w, "WarehouseID").toString().trim(),
-                        branch_name: getF(w, "Description").toString().trim() || getF(w, "WarehouseID")
-                    })).filter(b => b.branch_id);
-                    if (branches.length > 0) await supabase.from('branches').upsert(branches);
+                    const branches = await AcumaticaService.getRealBranches(cookie);
+                    if (branches.length > 0) {
+                        const bUpserts = branches.map(b => ({
+                            branch_id: b.BranchID.toString().trim(),
+                            branch_name: b.Description.toString().trim() || b.BranchID
+                        }));
+                        await supabase.from('branches').upsert(bUpserts);
+                    }
 
                     send({ section: "Inventory", details: "Updating product catalog...", progress: 10 });
                     let pSkip = 0, pTotal = 0, pHasMore = true;
@@ -155,59 +155,89 @@ export async function POST(request) {
                 // --- PHASE 2: SALES HISTORY ---
                 if (options.sales && !signal.aborted) {
                     send({ section: "Sales history", status: "syncing", details: "Mapping relational data...", progress: 2 });
-                    const [{ data: catalog }, { data: branchList }] = await Promise.all([
-                        supabase.from('products').select('*'),
-                        supabase.from('branches').select('*')
+                    const [{ data: catalog }] = await Promise.all([
+                        supabase.from('products').select('*')
                     ]);
                     const productMap = new Map((catalog || []).map(p => [p.inventory_id.toUpperCase().trim(), p]));
-                    const branchMap = new Map((branchList || []).map(b => [b.branch_id.toUpperCase().trim(), b.branch_name]));
-
-                    send({ section: "Sales history", details: "Fetching latest records...", progress: 5 });
-                    let sSkip = 0, sTotal = 0, sHasMore = true;
-                    while (sHasMore && !signal.aborted) {
-                        const url = `${ACU_BASE}/SalesInvoice?$expand=Details&$top=40&$skip=${sSkip}`;
-                        const res = await AcumaticaService.fetchWithRetry(url, cookie);
-                        const data = await res.json();
-                        let invoices = data.value || (Array.isArray(data) ? data : []);
-                        if (invoices.length === 0) { sHasMore = false; break; }
-
-                        const sUpserts = [];
-                        for (const inv of invoices) {
-                            const date = getF(inv, "Date");
-                            const period = getF(inv, "FinancialPeriod") || getF(inv, "PostPeriod") || getPeriodForDate(date);
-                            const hBranch = getF(inv, "BranchID") || getF(inv, "Branch") || "";
-
-                            for (const line of (inv.Details || [])) {
-                                const invIdRaw = getF(line, "InventoryID").toString().trim();
-                                if (!invIdRaw) continue;
-                                const p = productMap.get(invIdRaw.toUpperCase());
-                                const bId = (getF(line, "BranchID") || getF(line, "WarehouseID") || hBranch).toString().trim();
-                                
-                                sUpserts.push({
-                                    branch_name: bId, // Storing ID directly for consistency
-                                    order_type: getF(inv, "Type") || "Invoice",
-                                    financial_period: period,
-                                    document_date: date || null,
-                                    description: p?.description || getF(line, "TransactionDescr") || getF(line, "Description") || "",
-                                    qty: Number(getF(line, "Qty") || 0),
-                                    total_amount: Number(getF(line, "Amount") || 0),
-                                    inventory_id: invIdRaw,
-                                    item_class: p?.item_class || "",
-                                    posting_class: p?.posting_class || "",
-                                    last_sync: new Date().toISOString()
-                                });
-                            }
-                        }
-                        if (sUpserts.length > 0) {
-                            await supabase.from('product_periodic_sales').upsert(sUpserts);
-                            sTotal += sUpserts.length;
-                        }
-                        sSkip += invoices.length;
-                        sHasMore = invoices.length === 40 && sSkip < 1200;
-                        send({ section: "Sales history", details: `Synced ${sTotal} records...`, progress: Math.min(99, 5 + Math.floor(sSkip / 12)) });
-                        await delay(400);
+                    
+                    send({ section: "Sales history", details: "Counting total records for accuracy...", progress: 4 });
+                    let totalExpected = 1000000; // Default fallback
+                    try {
+                        const countRes = await AcumaticaService.fetchWithRetry(`${ACU_BASE}/SalesInvoice?$count=true&$top=1`, cookie);
+                        const countData = await countRes.json();
+                        totalExpected = parseInt(countData["@odata.count"]) || totalExpected;
+                        console.log(`>>> [Sync] Total Records to Sync: ${totalExpected}`);
+                    } catch (cErr) {
+                        console.warn(">>> [Sync] Could not get total count, using fallback.");
                     }
-                    send({ section: "Sales history", status: "done", details: "Sales History Updated!", progress: 100 });
+
+                    send({ section: "Sales history", details: `Fetching all branches (Total: ~${totalExpected.toLocaleString()})...`, progress: 5 });
+
+                    let sSkip = 0, sTotal = 0, sHasMore = true;
+                    // Single pass to get everything from SalesInvoice
+                    while (sHasMore && !signal.aborted) {
+                        const url = `${ACU_BASE}/SalesInvoice?$expand=Details&$top=100&$skip=${sSkip}`;
+                        
+                        try {
+                            const res = await AcumaticaService.fetchWithRetry(url, cookie);
+                            const data = await res.json();
+                            let invoices = data.value || (Array.isArray(data) ? data : []);
+                            
+                            if (invoices.length === 0) { sHasMore = false; break; }
+
+                            const sUpserts = [];
+                            for (const inv of invoices) {
+                                const date = getF(inv, "Date");
+                                const period = getF(inv, "FinancialPeriod") || getPeriodForDate(date);
+                                const invType = getF(inv, "Type") || "Invoice";
+                                const hBranch = getF(inv, "Branch") || getF(inv, "BranchID") || "";
+
+                                for (const line of (inv.Details || [])) {
+                                    const invIdRaw = getF(line, "InventoryID").toString().trim();
+                                    if (!invIdRaw) continue;
+                                    
+                                    const p = productMap.get(invIdRaw.toUpperCase());
+                                    const lineBranch = (getF(line, "BranchID") || getF(line, "Branch") || hBranch || "BACOLOD").toString().trim();
+                                    
+                                    sUpserts.push({
+                                        branch_name: lineBranch,
+                                        order_type: invType,
+                                        financial_period: period,
+                                        document_date: date || null,
+                                        description: p?.description || getF(line, "TransactionDescr") || getF(line, "Description") || "",
+                                        qty: Number(getF(line, "Qty") || 0),
+                                        total_amount: Number(getF(line, "Amount") || 0),
+                                        inventory_id: invIdRaw,
+                                        item_class: p?.item_class || "",
+                                        posting_class: p?.posting_class || "",
+                                        last_sync: new Date().toISOString()
+                                    });
+                                }
+                            }
+
+                            if (sUpserts.length > 0) {
+                                await supabase.from('product_periodic_sales').upsert(sUpserts);
+                                sTotal += sUpserts.length;
+                            }
+
+                            sSkip += invoices.length;
+                            sHasMore = invoices.length === 100;
+                            
+                            const currentProgress = Math.min(99, 5 + Math.floor((sSkip / totalExpected) * 94));
+                            send({ 
+                                section: "Sales history", 
+                                details: `Synced ${sTotal.toLocaleString()} of ~${totalExpected.toLocaleString()} records...`, 
+                                progress: currentProgress 
+                            });
+                            
+                            await delay(50);
+                        } catch (fetchErr) {
+                            console.error(`>>> [Sync Error] Failed at skip ${sSkip}:`, fetchErr.message);
+                            if (fetchErr.message === "Unauthorized") throw fetchErr; 
+                            sHasMore = false; 
+                        }
+                    }
+                    send({ section: "Sales history", status: "done", details: `Sales History Updated! Total: ${sTotal.toLocaleString()} records across all branches.`, progress: 100 });
                 }
 
                 send({ status: "complete", message: "Sync completed successfully" });
