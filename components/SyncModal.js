@@ -38,8 +38,8 @@ export default function SyncModal({ isOpen, onClose, onSyncComplete }) {
         const interval = setInterval(() => {
             // Smooth Overall Progress
             setDisplayOverall(prev => {
-                if (prev < overallProgress) return Math.min(prev + 1, overallProgress);
-                return prev;
+                if (prev < overallProgress) return Math.min(prev + 1, overallProgress, 100);
+                return Math.min(prev, 100);
             });
 
             // Smooth Section Progress
@@ -47,10 +47,10 @@ export default function SyncModal({ isOpen, onClose, onSyncComplete }) {
                 const next = { ...prev };
                 let changed = false;
                 Object.keys(sections).forEach(key => {
-                    const target = sections[key].progress || 0;
+                    const target = Math.min(100, sections[key].progress || 0);
                     const current = next[key] || 0;
                     if (current < target) {
-                        next[key] = Math.min(current + 1, target);
+                        next[key] = Math.min(current + 1, target, 100);
                         changed = true;
                     }
                 });
