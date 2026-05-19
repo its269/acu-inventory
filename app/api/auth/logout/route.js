@@ -1,7 +1,12 @@
 import { NextResponse } from "next/server";
+import { AuthService } from "@/services/auth";
 
-export async function GET() {
+export async function GET(request) {
     console.log("[Logout] Clearing acu_session cookie and redirecting to /signin");
+
+    // Release the Acumatica API session so it doesn't count against the login limit
+    const cookie = request.headers.get("cookie") || "";
+    await AuthService.logout(cookie);
 
     // Redirect to /signin — cookie is cleared in the same response so the
     // middleware sees it immediately and won't bounce the user back to /dashboard.
