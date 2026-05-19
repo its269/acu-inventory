@@ -1,10 +1,14 @@
 import { NextResponse } from "next/server";
 
-export async function POST() {
-    console.log("[Logout] Clearing acu_session cookie");
-    const response = NextResponse.json({ success: true });
+export async function GET() {
+    console.log("[Logout] Clearing acu_session cookie and redirecting to /signin");
 
-    // Clear the session marker cookie
+    // Redirect to /signin — cookie is cleared in the same response so the
+    // middleware sees it immediately and won't bounce the user back to /dashboard.
+    const response = NextResponse.redirect(
+        new URL("/signin", process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000")
+    );
+
     response.cookies.set("acu_session", "", {
         httpOnly: true,
         sameSite: "lax",
@@ -12,6 +16,6 @@ export async function POST() {
         maxAge: 0,
     });
 
-    console.log("[Logout] Session cookie cleared — user logged out");
+    console.log("[Logout] Done — redirecting to /signin");
     return response;
 }

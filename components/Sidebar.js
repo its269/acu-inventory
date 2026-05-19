@@ -53,8 +53,8 @@ export default function Sidebar() {
   }, []);
 
   const navItems = [
-    { name: "Stock Items", href: "/stock-items", icon: <IconStock /> },
     { name: "Inventory", href: "/dashboard", icon: <IconInventory /> },
+    { name: "Stock Items", href: "/stock-items", icon: <IconStock /> },
     { name: "Incoming PO", href: "/po", icon: <IconPO /> },
     { name: "Last 3 Months Sales", href: "/sales", icon: <IconSales /> },
   ];
@@ -88,8 +88,8 @@ export default function Sidebar() {
         ))}
 
         <div style={{ margin: '1.5rem 0.75rem 0.5rem', borderTop: '1px solid rgba(255,255,255,0.1)', paddingTop: '1.5rem' }}>
-          <button 
-            className="sidebar-item" 
+          <button
+            className="sidebar-item"
             style={{ width: '100%', background: 'rgba(59, 130, 246, 0.1)', color: '#60a5fa', border: '1px solid rgba(59, 130, 246, 0.2)' }}
             onClick={() => setShowSyncModal(true)}
           >
@@ -104,21 +104,22 @@ export default function Sidebar() {
         </div>
       </nav>
 
-      <SyncModal 
-        isOpen={showSyncModal} 
-        onClose={() => setShowSyncModal(false)} 
-        onSyncComplete={() => window.location.reload()} 
+      <SyncModal
+        isOpen={showSyncModal}
+        onClose={() => setShowSyncModal(false)}
+        onSyncComplete={() => window.location.reload()}
       />
 
       <div className="sidebar-footer">
         <button
           className="sidebar-logout"
-          onClick={async () => {
+          onClick={() => {
             localStorage.removeItem("userName");
             localStorage.removeItem("userFirstName");
             localStorage.removeItem("userLastName");
-            await fetch("/api/auth/logout", { method: "POST" });
-            window.location.href = "/signin";
+            // Navigate directly — the logout route clears the cookie and
+            // redirects to /signin in a single server response.
+            window.location.href = "/api/auth/logout";
           }}
         >
           <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">

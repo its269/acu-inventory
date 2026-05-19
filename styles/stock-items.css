@@ -1,0 +1,111 @@
+/* ============================================================
+   Stock Items Page — supplemental styles
+   Reuses db-* classes from dashboard.css for table/toolbar
+   ============================================================ */
+
+.si-root {
+    width: 100%;
+}
+
+.si-main {
+    max-width: 1600px;
+    margin: 0 auto;
+    padding: 2rem 2rem 4rem;
+    display: flex;
+    flex-direction: column;
+    gap: 2rem;
+}
+
+/* ── Summary row ────────────────────────────────────────── */
+.si-summary-row {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+}
+
+.si-total-chip {
+    display: inline-flex;
+    align-items: center;
+    background: #f1f5f9;
+    border: 1px solid #e2e8f0;
+    border-radius: 9999px;
+    padding: 0.3rem 0.9rem;
+    font-size: 0.8rem;
+    font-weight: 600;
+    color: #475569;
+}
+
+/* ── Inventory ID chip ──────────────────────────────────── */
+.si-id-chip {
+    font-family: ui-monospace, "Cascadia Code", monospace;
+    font-size: 0.8rem;
+    background: #f1f5f9;
+    border-radius: 6px;
+    padding: 0.2rem 0.5rem;
+    color: #334155;
+    white-space: nowrap;
+}
+
+/* ── Loading / empty cells ──────────────────────────────── */
+.si-loading-cell,
+.si-empty-cell {
+    text-align: center;
+    padding: 3rem 1rem;
+    color: #94a3b8;
+    font-size: 0.9rem;
+}
+
+/* ── Error ──────────────────────────────────────────────── */
+.si-error {
+    background: #fef2f2;
+    border: 1px solid #fecaca;
+    border-radius: 10px;
+    padding: 1rem 1.25rem;
+    color: #dc2626;
+    font-size: 0.875rem;
+    font-weight: 500;
+}
+
+/* ── Pagination ─────────────────────────────────────────── */
+.si-pagination {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0.5rem 0;
+}
+
+.si-page-info {
+    font-size: 0.875rem;
+    color: #64748b;
+    font-weight: 500;
+}
+
+.si-page-buttons {
+    display: flex;
+    gap: 0.5rem;
+}
+
+.si-page-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+    padding: 0.5rem 1rem;
+    border: 1px solid #e2e8f0;
+    border-radius: 8px;
+    background: #ffffff;
+    font-size: 0.875rem;
+    font-weight: 600;
+    color: #334155;
+    cursor: pointer;
+    transition: background 0.15s, border-color 0.15s;
+}
+
+.si-page-btn:hover:not(:disabled) {
+    background: #f8fafc;
+    border-color: #cbd5e1;
+}
+
+.si-page-btn:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+}

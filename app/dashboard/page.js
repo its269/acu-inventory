@@ -94,7 +94,7 @@ const InventoryRow = memo(({ row, index, onClick }) => {
     const price = Number(row.DefaultPrice?.value) || 0;
 
     return (
-        <tr 
+        <tr
             className={`${status === "LOW_STOCK" ? "db-row-warn" : status === "OUT_OF_STOCK" ? "db-row-danger" : ""} db-clickable-row`}
             onClick={() => onClick(cellVal(row, "InventoryID"))}
         >
@@ -141,7 +141,7 @@ const SalesAnalysisModal = ({ isOpen, onClose, initialProductId }) => {
                     const names = list.map((b) => b.SiteID || b.BranchName?.value || b.BranchID?.value).filter(Boolean);
                     setBranchOptions([...new Set(names)].sort());
                 }
-            } catch {}
+            } catch { }
         };
         fetchBranches();
     }, [isOpen]);
@@ -154,10 +154,10 @@ const SalesAnalysisModal = ({ isOpen, onClose, initialProductId }) => {
             const res = await fetch(`/api/sales-periodic?${params.toString()}`);
             if (!res.ok) throw new Error("Failed to load sales");
             const result = await res.json();
-            
+
             let filtered = result.data || [];
             if (search) {
-                filtered = filtered.filter(item => 
+                filtered = filtered.filter(item =>
                     item.inventoryId.toLowerCase().includes(search.toLowerCase())
                 );
             }
@@ -183,7 +183,7 @@ const SalesAnalysisModal = ({ isOpen, onClose, initialProductId }) => {
                     <div className="db-modal-title"><IconBarChart /> <span>Product Periodic Sales Analysis</span></div>
                     <button className="db-modal-close" onClick={onClose}><IconClose /></button>
                 </div>
-                
+
                 <div className="db-sales3m-filter-panel">
                     <div className="db-sales3m-filter-row">
                         <div className="db-sales3m-filter-group">
@@ -204,10 +204,10 @@ const SalesAnalysisModal = ({ isOpen, onClose, initialProductId }) => {
                         </div>
                         <div className="db-sales3m-filter-group" style={{ flex: 1 }}>
                             <label>Filter Product ID</label>
-                            <input 
-                                type="text" 
-                                placeholder="Search Product ID..." 
-                                value={search} 
+                            <input
+                                type="text"
+                                placeholder="Search Product ID..."
+                                value={search}
                                 onChange={(e) => setSearch(e.target.value)}
                                 style={{ height: '42px', width: '100%', border: '1px solid #e2e8f0', borderRadius: '10px', padding: '0 1rem' }}
                             />
@@ -309,7 +309,11 @@ export default function DashboardPage() {
                     const data = await res.json();
                     const list = Array.isArray(data) ? data : (data?.value || []);
                     const names = list.map((b) => b.SiteID || b.BranchName?.value).filter(Boolean);
-                    setBranchOptions([...new Set(names)].sort());
+                    const unique = [...new Set(names)].sort();
+                    setBranchOptions(unique);
+                    // Default to the "MAIN" branch if it exists, otherwise leave as All Branches
+                    const mainBranch = unique.find(n => n.toUpperCase() === "MAIN") || unique.find(n => n.toUpperCase().includes("MAIN"));
+                    if (mainBranch) setSelectedBranch(mainBranch);
                 }
             } catch (err) { console.error("Branch fetch error", err); }
         };
@@ -565,23 +569,6 @@ export default function DashboardPage() {
             )}
 
             <main className="db-main" style={{ maxWidth: '1400px' }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '2rem' }}>
-                    <div className="db-logo" style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
-                        <div className="db-user-avatar" style={{ background: '#0f172a', width: '40px', height: '40px' }}><IconBox /></div>
-                        <div>
-                            <div style={{ fontSize: '1.25rem', fontWeight: '800', color: '#0f172a', lineHeight: '1.1' }}>ACU</div>
-                            <div style={{ fontSize: '0.75rem', fontWeight: '600', color: '#64748b' }}>Inventory</div>
-                        </div>
-                    </div>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
-                        <div className="db-user-chip">
-                            <div className="db-user-avatar">{initials}</div>
-                            <span className="db-user-name">{userName}</span>
-                        </div>
-                        <button className="db-refresh-btn" style={{ padding: '0.5rem', width: '40px' }} onClick={() => router.push("/signin")}><IconLogout /></button>
-                    </div>
-                </div>
-
                 <div className="db-page-title">
                     <h1>Inventory Dashboard</h1>
                     <p>Manage and monitor stock levels across all locations.</p>
@@ -654,10 +641,10 @@ export default function DashboardPage() {
                             </thead>
                             <tbody>
                                 {allInventory.map((row, i) => (
-                                    <InventoryRow 
-                                        key={i} 
-                                        row={row} 
-                                        index={(page - 1) * ROWS_PER_PAGE + i + 1} 
+                                    <InventoryRow
+                                        key={i}
+                                        row={row}
+                                        index={(page - 1) * ROWS_PER_PAGE + i + 1}
                                         onClick={(id) => { setActiveProductId(id); setShowSalesModal(true); }}
                                     />
                                 ))}
@@ -675,10 +662,10 @@ export default function DashboardPage() {
                     </div>
                 </div>
 
-                <SalesAnalysisModal 
-                    isOpen={showSalesModal} 
-                    onClose={() => setShowSalesModal(false)} 
-                    initialProductId={activeProductId} 
+                <SalesAnalysisModal
+                    isOpen={showSalesModal}
+                    onClose={() => setShowSalesModal(false)}
+                    initialProductId={activeProductId}
                 />
             </main>
         </div>
