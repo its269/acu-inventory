@@ -1,34 +1,32 @@
 import { AuthService } from "@/services/auth";
 import { NextResponse } from "next/server";
-import { cookies } from "next/headers";
 
 export async function POST(request) {
     try {
         const { username, password, company } = await request.json();
 
-        const cookiesList = await AuthService.login({ username, password, company });
-        const cookieStore = await cookies();
+        console.log(`[Login] Attempting login for user: ${username}`);
+        const cookies = await AuthService.login({ username, password, company });
+        console.log(`[Login] Acumatica returned ${cookies?.length ?? 0} cookie(s)`);
 
-        if (cookiesList && Array.isArray(cookiesList)) {
-            cookiesList.forEach(cookieStr => {
-                // Parse the name=value part
-                const parts = cookieStr.split(';')[0].split('=');
-                if (parts.length < 2) return;
+        const response = NextResponse.json({ success: true });
 
-                const name = parts[0].trim();
-                const value = parts.slice(1).join('=').trim();
-
-                cookieStore.set(name, value, {
-                    path: "/",
-                    sameSite: "lax",
-                    secure: false, // Localhost support
-                    httpOnly: true,
-                    maxAge: 3600 * 8
-                });
+        if (cookies && Array.isArray(cookies)) {
+            cookies.forEach(cookie => {
+                response.headers.append("set-cookie", cookie);
             });
         }
-        // comment
-        return NextResponse.json({ success: true });
+
+        // Marker cookie so middleware can verify authenticated state
+        response.cookies.set("acu_session", "1", {
+            httpOnly: true,
+            sameSite: "lax",
+            path: "/",
+            maxAge: 60 * 60 * 8, // 8 hours
+        });
+
+        console.log(`[Login] acu_session cookie set for: ${username}`);
+        return response;
     } catch (err) {
         console.error("[BFF Login Error]", err);
         return NextResponse.json({ message: err.message || "Login failed" }, { status: 401 });
