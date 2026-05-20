@@ -1,26 +1,18 @@
 import { NextResponse } from "next/server";
 import { AuthService } from "@/services/auth";
+import { getSession, deleteSession } from "@/lib/session-store";
 
 export async function GET(request) {
-    console.log("[Logout] Clearing acu_session cookie and redirecting to /signin");
+    console.log("[Logout] Clearing session and redirecting to /signin");
+    const sessionId = request.cookies.get("acu_session")?.value;
+    const cookie = getSession(sessionId);
+    if (cookie) await AuthService.logout(cookie);
+    if (sessionId) deleteSession(sessionId);
 
-    // Release the Acumatica API session so it doesn't count against the login limit
-    const cookie = request.headers.get("cookie") || "";
-    await AuthService.logout(cookie);
-
-    // Redirect to /signin — cookie is cleared in the same response so the
-    // middleware sees it immediately and won't bounce the user back to /dashboard.
     const response = NextResponse.redirect(
         new URL("/signin", process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000")
     );
-
-    response.cookies.set("acu_session", "", {
-        httpOnly: true,
-        sameSite: "lax",
-        path: "/",
-        maxAge: 0,
-    });
-
+    response.cookies.set("acu_session", "", { httpOnly: true, sameSite: "lax", path: "/", maxAge: 0 });
     console.log("[Logout] Done — redirecting to /signin");
     return response;
 }
