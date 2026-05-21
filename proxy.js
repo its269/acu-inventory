@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 
 const PUBLIC_PATHS = ["/signin", "/api/auth/login", "/api/auth/logout"];
 
-export function middleware(request) {
+export function proxy(request) {
     const { pathname } = request.nextUrl;
 
     // Allow static assets through unconditionally

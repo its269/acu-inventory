@@ -98,6 +98,90 @@ export const SupabaseService = {
     },
 
     /**
+     * Fetch unique products (not per-branch) with optional search and pagination
+     */
+    async getProducts({ page = 1, pageSize = 50, search = "" } = {}) {
+        const from = (page - 1) * pageSize;
+        const to = from + pageSize - 1;
+
+        let query = supabase
+            .from("products")
+            .select("inventory_id, description, item_class", { count: "exact" })
+            .order("inventory_id", { ascending: true });
+
+        if (search) {
+            query = query.or(
+                `inventory_id.ilike.%${search}%,description.ilike.%${search}%`
+            );
+        }
+
+        const { data, count, error } = await query.range(from, to);
+        if (error) throw error;
+
+        return {
+            items: (data || []).map(p => ({
+                inventoryId: p.inventory_id,
+                description: p.description || "—",
+                itemClass: p.item_class || "—",
+            })),
+            totalCount: count ?? 0,
+        };
+    },
+
+    /**
+     * Fetch per-branch stock detail for a single product
+     */
+    async getProductStockDetail(inventoryId) {
+        // Fetch product metadata and branch stock levels in parallel
+        const [productRes, levelsRes] = await Promise.all([
+            supabase
+                .from("products")
+                .select("*")
+                .eq("inventory_id", inventoryId)
+                .maybeSingle(),
+            supabase
+                .from("inventory_levels")
+                .select("branch_id, site_id, on_hand, available, updated_at")
+                .eq("inventory_id", inventoryId)
+                .order("branch_id", { ascending: true }),
+        ]);
+
+        // product not found is non-fatal — show dashes
+        if (productRes.error) console.error("[getProductStockDetail] products error:", productRes.error);
+        const product = productRes.data || {};
+        console.log("[getProductStockDetail] inventoryId=", inventoryId, "product keys:", Object.keys(product));
+
+        if (levelsRes.error) throw levelsRes.error;
+        const rows = levelsRes.data || [];
+
+        const branches = rows.map(r => ({
+            branchId: r.branch_id,
+            siteId: r.site_id,
+            onHand: r.on_hand ?? 0,
+            available: r.available ?? 0,
+            updatedAt: r.updated_at,
+        }));
+
+        const totalOnHand = branches.reduce((s, b) => s + b.onHand, 0);
+        const totalAvailable = branches.reduce((s, b) => s + b.available, 0);
+
+        const result = {
+            inventoryId,
+            description: product.description || "—",
+            itemClass: product.item_class || "—",
+            unitPrice: product.default_price ?? product.unit_price ?? 0,
+            itemStatus: product.item_status || product.status || "—",
+            baseUnit: product.base_unit || product.uom || "—",
+            lastSync: product.last_sync || product.updated_at || null,
+            totalOnHand,
+            totalAvailable,
+            branches,
+        };
+        console.log("[getProductStockDetail] result:", JSON.stringify(result));
+        return result;
+    },
+
+    /**
      * Fetch all stock items across all branches with optional search and pagination
      */
     async getStockItems({ page = 1, pageSize = 50, search = "" } = {}) {

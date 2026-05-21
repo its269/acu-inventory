@@ -1,0 +1,112 @@
+/* ── Incoming PO Page Styles ─────────────────────────────── */
+
+.po-table th,
+.po-table td {
+    white-space: nowrap;
+}
+
+/* Status badge overrides */
+.po-status-open {
+    background: #dbeafe;
+    color: #1d4ed8;
+}
+
+.po-status-closed {
+    background: #f3f4f6;
+    color: #6b7280;
+}
+
+.po-status-completed {
+    background: #dcfce7;
+    color: #15803d;
+}
+
+.po-status-cancelled {
+    background: #fee2e2;
+    color: #b91c1c;
+}
+
+.po-status-default {
+    background: #fef9c3;
+    color: #a16207;
+}
+
+/* Expand icon */
+.po-expand-icon {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 22px;
+    height: 22px;
+    border-radius: 4px;
+    color: #6b7280;
+    transition: transform 0.18s ease, background 0.15s;
+}
+
+.po-expand-icon.po-expand-open {
+    transform: rotate(180deg);
+    color: #2563eb;
+}
+
+/* Hovered / expanded row */
+.po-row:hover {
+    background: #f8faff;
+}
+
+.po-row-expanded>td {
+    border-bottom: none;
+}
+
+/* Vendor cell */
+.po-vendor {
+    font-weight: 600;
+    font-size: 0.85rem;
+    color: #111;
+}
+
+.po-vendor-name {
+    font-size: 0.75rem;
+    color: #6b7280;
+    margin-top: 1px;
+}
+
+/* Expanded lines sub-table */
+.po-lines-row>td {
+    background: #f8faff;
+    border-bottom: 2px solid #e2e8f0;
+}
+
+.po-lines-wrap {
+    padding: 12px 24px 16px 48px;
+}
+
+.po-lines-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.8rem;
+}
+
+.po-lines-table th {
+    background: #eef2ff;
+    color: #4338ca;
+    font-weight: 600;
+    padding: 6px 12px;
+    text-align: left;
+    border-bottom: 1px solid #c7d2fe;
+}
+
+.po-lines-table td {
+    padding: 6px 12px;
+    border-bottom: 1px solid #e9ecef;
+    color: #374151;
+}
+
+.po-lines-table tr:last-child td {
+    border-bottom: none;
+}
+
+/* Smaller id chip for line items */
+.si-id-chip-sm {
+    font-size: 0.7rem;
+    padding: 2px 6px;
+}

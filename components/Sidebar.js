@@ -38,7 +38,7 @@ export default function Sidebar() {
   const [showSyncModal, setShowSyncModal] = useState(false);
 
   useEffect(() => {
-    setMounted(true);
+    Promise.resolve().then(() => setMounted(true));
   }, []);
 
   useEffect(() => {

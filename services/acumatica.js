@@ -41,15 +41,15 @@ export const AcumaticaService = {
 
                 if (res.status === 429 || res.status === 500 || res.status === 503) {
                     const errorText = await res.text().catch(() => "No error body");
-                    console.warn(`[Acumatica] Status ${res.status}. Retry ${attempts}/${maxAttempts}. Body: ${errorText.substring(0, 100)}`);      
-                    await new Promise(r => setTimeout(r, 2000 * attempts)); 
+                    console.warn(`[Acumatica] Status ${res.status}. Retry ${attempts}/${maxAttempts}. Body: ${errorText.substring(0, 100)}`);
+                    await new Promise(r => setTimeout(r, 2000 * attempts));
                     lastError = new Error(`Acumatica Error: ${res.status}`);
                     continue;
                 }
 
                 if (!res.ok) throw new Error(`Acumatica Error: ${res.status}`);
 
-                return res; 
+                return res;
             } catch (err) {
                 if (err.message === "Unauthorized") throw err;
                 console.error(`[Acumatica Fetch Error] Attempt ${attempts}:`, err.message);
@@ -155,7 +155,7 @@ export const AcumaticaService = {
         const cachedCount = countCache.get(cacheKey);
         const cachedStats = statsCache.get(statsKey);
 
-        const dataUrl = `${ACU_BASE}/StockItem?$expand=WarehouseDetails&$select=${selectFields}&$top=${pageSize}&$skip=${skip}${filterStr}`;       
+        const dataUrl = `${ACU_BASE}/StockItem?$expand=WarehouseDetails&$select=${selectFields}&$top=${pageSize}&$skip=${skip}${filterStr}`;
         const res = await this.fetchWithRetry(dataUrl, cookie);
         const data = await res.json();
         const rawItems = data.value || (Array.isArray(data) ? data : []);
@@ -163,7 +163,7 @@ export const AcumaticaService = {
         let globalStats = cachedStats || { totalValue: 0, lowStock: 0, outOfStock: 0, count: 0 };
         if (includeStats && !cachedStats) {
             try {
-                const statsUrl = `${ACU_BASE}/StockItem?$expand=WarehouseDetails&$select=DefaultPrice,WarehouseDetails&$top=1000${filterStr}`;     
+                const statsUrl = `${ACU_BASE}/StockItem?$expand=WarehouseDetails&$select=DefaultPrice,WarehouseDetails&$top=1000${filterStr}`;
                 const sRes = await this.fetchWithRetry(statsUrl, cookie);
                 const sData = await sRes.json();
                 const sItems = sData.value || [];
@@ -174,7 +174,7 @@ export const AcumaticaService = {
                     let onHand = 0;
                     const wds = item.WarehouseDetails || [];
                     if (branch) {
-                        const wh = wds.find(w => (w.WarehouseID?.value ?? w.WarehouseID ?? "").toString().toLowerCase() === branch.toLowerCase()); 
+                        const wh = wds.find(w => (w.WarehouseID?.value ?? w.WarehouseID ?? "").toString().toLowerCase() === branch.toLowerCase());
                         onHand = Number(wh?.QtyOnHand?.value ?? wh?.QtyOnHand ?? 0);
                     } else {
                         wds.forEach(wh => { onHand += Number(wh.QtyOnHand?.value ?? wh.QtyOnHand ?? 0); });
@@ -216,14 +216,15 @@ export const AcumaticaService = {
 
     /** ── BRANCHES: Get Actual Branch IDs ── */
     async getRealBranches(cookie) {
-        const url = `${ACU_BASE}/Branch?$select=BranchID,Description`;
+        // Try Warehouse endpoint (Branch endpoint not available on this API version)
         try {
+            const url = `${ACU_BASE}/Warehouse?$select=WarehouseID,Description`;
             const res = await this.fetchWithRetry(url, cookie);
             const data = await res.json();
-            const branches = data.value || (Array.isArray(data) ? data : []);
-            return branches.map(b => ({
-                BranchID: b.BranchID?.value || b.BranchID,
-                Description: b.Description?.value || b.Description || ""
+            const warehouses = data.value || (Array.isArray(data) ? data : []);
+            return warehouses.map(w => ({
+                BranchID: w.WarehouseID?.value || w.WarehouseID,
+                Description: w.Description?.value || w.Description || ""
             })).filter(b => b.BranchID);
         } catch (err) {
             console.warn("[Acumatica Real Branch Error]", err.message);
@@ -244,7 +245,7 @@ export const AcumaticaService = {
             const data = await res.json();
             const warehouses = data.value || (Array.isArray(data) ? data : []);
             const result = warehouses
-                .map(w => ({ 
+                .map(w => ({
                     SiteID: w.WarehouseID?.value || w.WarehouseID,
                     Description: w.Description?.value || w.Description || ""
                 }))
@@ -271,7 +272,7 @@ export const AcumaticaService = {
         const end = endDate ? new Date(endDate) : new Date();
         const days = Math.max(1, Math.round((end - start) / (1000 * 60 * 60 * 24)));
 
-        let invUrl = `${ACU_BASE}/StockItem?$select=InventoryID,Description,ItemClass,PostingClass,DefaultWarehouseID&$expand=WarehouseDetails`;   
+        let invUrl = `${ACU_BASE}/StockItem?$select=InventoryID,Description,ItemClass,PostingClass,DefaultWarehouseID&$expand=WarehouseDetails`;
         if (branch) invUrl += `&$filter=DefaultWarehouseID eq '${branch.replace(/'/g, "''")}'`;
         const inventory = await this.fetchAllPages(invUrl, cookie, 200);
 

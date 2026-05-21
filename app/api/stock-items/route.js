@@ -8,10 +8,7 @@ export async function GET(request) {
         const pageSize = Math.min(100, Math.max(1, parseInt(searchParams.get("pageSize") || "50", 10)));
         const search = searchParams.get("search") || "";
 
-        console.log(`[Stock Items API] page=${page} pageSize=${pageSize} search="${search}"`);
-
-        const result = await SupabaseService.getStockItems({ page, pageSize, search });
-
+        const result = await SupabaseService.getProducts({ page, pageSize, search });
         return NextResponse.json(result);
     } catch (err) {
         console.error("[Stock Items API Error]", err);
