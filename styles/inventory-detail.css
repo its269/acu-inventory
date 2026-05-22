@@ -1,0 +1,296 @@
+/* ============================================================
+   Inventory Detail Modal — Improved Lightbox UI
+   ============================================================ */
+
+.idm-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(15, 23, 42, 0.45);
+    backdrop-filter: blur(4px);
+    z-index: 1000;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 1.5rem;
+    animation: idm-fade-in 0.2s ease-out;
+}
+
+@keyframes idm-fade-in {
+    from { opacity: 0; }
+    to { opacity: 1; }
+}
+
+.idm-modal {
+    background: #ffffff;
+    width: 100%;
+    max-width: 680px;
+    max-height: 90vh;
+    border-radius: 20px;
+    box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.25);
+    position: relative;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+    animation: idm-zoom-in 0.25s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+@keyframes idm-zoom-in {
+    from { transform: scale(0.95) translateY(10px); opacity: 0; }
+    to { transform: scale(1) translateY(0); opacity: 1; }
+}
+
+.idm-close-btn {
+    position: absolute;
+    top: 1.25rem;
+    right: 1.25rem;
+    width: 36px;
+    height: 36px;
+    border-radius: 50%;
+    background: #f1f5f9;
+    border: none;
+    color: #64748b;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    transition: all 0.2s;
+    z-index: 10;
+}
+
+.idm-close-btn:hover {
+    background: #e2e8f0;
+    color: #0f172a;
+    transform: rotate(90deg);
+}
+
+/* ── Content Layout ─────────────────────────────────────── */
+.idm-content {
+    overflow-y: auto;
+    padding: 2rem;
+    display: flex;
+    flex-direction: column;
+    gap: 1.75rem;
+}
+
+.idm-header {
+    display: flex;
+    flex-direction: column;
+    gap: 0.75rem;
+}
+
+.idm-top-row {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+}
+
+.idm-badge-id {
+    font-family: ui-monospace, monospace;
+    font-size: 0.75rem;
+    font-weight: 700;
+    background: #f1f5f9;
+    color: #475569;
+    padding: 0.25rem 0.6rem;
+    border-radius: 6px;
+    letter-spacing: 0.02em;
+}
+
+.idm-badge-class {
+    font-size: 0.7rem;
+    font-weight: 700;
+    background: #e0f2fe;
+    color: #0369a1;
+    padding: 0.25rem 0.6rem;
+    border-radius: 6px;
+    text-transform: uppercase;
+}
+
+.idm-title {
+    font-size: 1.5rem;
+    font-weight: 800;
+    color: #0f172a;
+    line-height: 1.2;
+    margin: 0;
+}
+
+.idm-source-row {
+    display: flex;
+    gap: 0.5rem;
+    flex-wrap: wrap;
+}
+
+.idm-source {
+    font-size: 0.725rem;
+    font-weight: 600;
+    padding: 0.15rem 0.5rem;
+    border-radius: 4px;
+}
+
+.idm-source-live { background: #dcfce7; color: #15803d; }
+.idm-source-cache { background: #eff6ff; color: #1d4ed8; }
+.idm-source-warn { background: #fff7ed; color: #c2410c; }
+
+/* ── Grid Cards ─────────────────────────────────────────── */
+.idm-grid {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 1rem;
+}
+
+.idm-card {
+    background: #f8fafc;
+    border: 1px solid #f1f5f9;
+    padding: 1.25rem;
+    border-radius: 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+}
+
+.idm-card-label {
+    font-size: 0.7rem;
+    font-weight: 700;
+    color: #94a3b8;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+}
+
+.idm-card-value-group {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 1rem;
+}
+
+.idm-card-value {
+    font-size: 1.5rem;
+    font-weight: 800;
+    color: #0f172a;
+}
+
+.idm-status-pill {
+    font-size: 0.7rem;
+    font-weight: 700;
+    padding: 0.2rem 0.6rem;
+    border-radius: 999px;
+    white-space: nowrap;
+}
+
+.idm-status-pill.status-in { background: #dcfce7; color: #15803d; }
+.idm-status-pill.status-low { background: #fef9c3; color: #854d0e; }
+.idm-status-pill.status-out { background: #fee2e2; color: #b91c1c; }
+
+.idm-status-pill-sm {
+    padding: 0.1rem 0.5rem;
+    font-size: 0.65rem;
+}
+
+/* ── Meta Bar ───────────────────────────────────────────── */
+.idm-meta-bar {
+    display: flex;
+    background: #f1f5f9;
+    border-radius: 10px;
+    padding: 0.75rem 1.25rem;
+    gap: 2rem;
+    flex-wrap: wrap;
+}
+
+.idm-meta-item {
+    display: flex;
+    gap: 0.4rem;
+    font-size: 0.8rem;
+}
+
+.idm-meta-label { color: #64748b; font-weight: 500; }
+.idm-meta-value { color: #334155; font-weight: 700; }
+
+/* ── Section & Table ────────────────────────────────────── */
+.idm-section {
+    display: flex;
+    flex-direction: column;
+    gap: 1rem;
+}
+
+.idm-section-title {
+    font-size: 0.85rem;
+    font-weight: 800;
+    color: #475569;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    border-bottom: 2px solid #f1f5f9;
+    padding-bottom: 0.5rem;
+    margin: 0;
+}
+
+.idm-table-container {
+    border: 1px solid #f1f5f9;
+    border-radius: 12px;
+    overflow: hidden;
+}
+
+.idm-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.875rem;
+}
+
+.idm-table th {
+    background: #f8fafc;
+    text-align: left;
+    padding: 0.75rem 1rem;
+    color: #64748b;
+    font-weight: 600;
+    font-size: 0.75rem;
+    text-transform: uppercase;
+    border-bottom: 1px solid #f1f5f9;
+}
+
+.idm-table td {
+    padding: 0.75rem 1rem;
+    border-bottom: 1px solid #f8fafc;
+    color: #1e293b;
+}
+
+.idm-table tr:hover td {
+    background: #fbfcfe;
+}
+
+.idm-table tfoot td {
+    background: #f8fafc;
+    font-weight: 800;
+    color: #0f172a;
+    border-top: 2px solid #e2e8f0;
+}
+
+.idm-txt-right { text-align: right; }
+.idm-txt-bold { font-weight: 700; }
+
+/* ── Loading & Errors ───────────────────────────────────── */
+.idm-loading {
+    padding: 4rem 2rem;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 1rem;
+    color: #64748b;
+}
+
+.idm-spinner {
+    width: 32px;
+    height: 32px;
+    border: 3px solid #f1f5f9;
+    border-top-color: #3b82f6;
+    border-radius: 50%;
+    animation: idm-spin 0.8s linear infinite;
+}
+
+@keyframes idm-spin {
+    to { transform: rotate(360deg); }
+}
+
+.idm-empty {
+    text-align: center;
+    padding: 2rem;
+    color: #94a3b8;
+    font-style: italic;
+}
