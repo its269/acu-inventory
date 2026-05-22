@@ -291,20 +291,28 @@ export async function POST(request) {
                         supabase.from("product_periodic_sales").delete().neq("id", "00000000-0000-0000-0000-000000000000")
                     );
 
-                    let totalExpected = 10000;
+                    let totalExpected = 0;
                     try {
                         const cRes = await AcumaticaService.fetchWithRetry(`${ACU_BASE}/SalesInvoice?$count=true&$top=1`, cookie);
                         const cData = await cRes.json();
-                        totalExpected = parseInt(cData["@odata.count"]) || totalExpected;
-                    } catch { }
+                        totalExpected = parseInt(cData["@odata.count"] || cData["count"] || cData["d"]?.["__count"] || 0);
+                    } catch (e) { }
 
-                    send({ section: "Sales history", details: `Fetching ~${totalExpected.toLocaleString()} records...`, progress: 5 });
+                    if (totalExpected <= 0) {
+                        totalExpected = 100000;
+                    }
+
+                    send({ 
+                        section: "Sales history", 
+                        details: `Fetching records...`, 
+                        progress: 5 
+                    });
 
                     let sSkip = 0, sTotal = 0;
                     while (!signal.aborted) {
                         try {
                             const res = await AcumaticaService.fetchWithRetry(
-                                `${ACU_BASE}/SalesInvoice?$expand=Details&$top=100&$skip=${sSkip}`, cookie
+                                `${ACU_BASE}/SalesInvoice?$expand=Details&$top=200&$skip=${sSkip}`, cookie
                             );
                             const data = await res.json();
                             const invoices = data.value || (Array.isArray(data) ? data : []);
@@ -346,20 +354,26 @@ export async function POST(request) {
                             }
 
                             sSkip += invoices.length;
-                            if (invoices.length < 100) break;
+                            
+                            if (sSkip >= totalExpected) {
+                                totalExpected = sSkip + 1000;
+                            }
+
+                            const calcProgress = 5 + Math.floor((sSkip / totalExpected) * 94);
+
                             send({
                                 section: "Sales history",
                                 details: `Synced ${sTotal.toLocaleString()} records...`,
-                                progress: Math.min(99, 5 + Math.floor((sSkip / totalExpected) * 94))
+                                progress: Math.min(99, calcProgress)
                             });
-                            await delay(50);
+                            
+                            if (invoices.length < 200) break;
+                            await delay(20);
                         } catch (err) {
-                            console.error(`>>> [Sync] Sales error at skip=${sSkip}:`, err.message);
                             if (err.message === "Unauthorized") throw err;
                             break;
                         }
                     }
-                    console.log(`>>> [Sync] Sales done: ${sTotal} total rows`);
                     send({ section: "Sales history", status: "done", details: `Sales complete! ${sTotal.toLocaleString()} records synced.`, progress: 100 });
                 }
 
