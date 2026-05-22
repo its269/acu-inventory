@@ -325,5 +325,71 @@ export const AcumaticaService = {
         const res = await this.fetchWithRetry(url, cookie);
         const data = await res.json();
         return data.value || [];
+    },
+
+    async fetchSalesInvoicesByDateRange({ cookie, startDate, endDate }) {
+        const results = [];
+        const filter = `Date ge datetimeoffset'${startDate}T00:00:00Z' and Date le datetimeoffset'${endDate}T23:59:59Z'`;
+        
+        try {
+            console.log(`>>> [Acumatica] Searching SalesInvoice: ${filter}`);
+            let url = `${ACU_BASE}/SalesInvoice?$expand=Details&$top=500&$filter=${filter}`;
+            let res = await this.fetchWithRetry(url, cookie);
+            let data = await res.json();
+            let items = data.value || (Array.isArray(data) ? data : []);
+            
+            if (items.length > 0) return items;
+
+            url = `${ACU_BASE}/Invoice?$expand=Details&$top=500&$filter=${filter}`;
+            res = await this.fetchWithRetry(url, cookie);
+            data = await res.json();
+            items = data.value || (Array.isArray(data) ? data : []);
+            
+            if (items.length > 0) return items;
+
+            url = `${ACU_BASE}/Invoice?$expand=Details&$top=100&$orderby=Date desc`;
+            res = await this.fetchWithRetry(url, cookie);
+            data = await res.json();
+            return data.value || [];
+
+        } catch (err) {
+            return [];
+        }
+    },
+
+    async getIncomingPO(cookie) {
+        try {
+            const url = `${ACU_BASE}/PurchaseOrder?$expand=Details&$filter=Status eq 'Open' or Status eq 'Balanced'`;
+            const res = await this.fetchWithRetry(url, cookie);
+            const data = await res.json();
+            const pos = data.value || (Array.isArray(data) ? data : []);
+
+            return pos.map(po => ({
+                orderNbr: getF(po, "OrderNbr"),
+                status: getF(po, "Status"),
+                vendor: getF(po, "VendorID") || getF(po, "Vendor"),
+                orderDate: getF(po, "Date") || getF(po, "OrderDate"),
+                details: (po.Details || []).map(d => ({
+                    inventoryId: getF(d, "InventoryID"),
+                    description: getF(d, "Description") || getF(d, "TransactionDescr"),
+                    qty: Number(getF(d, "OrderQty") || getF(d, "Qty") || 0),
+                    unitCost: Number(getF(d, "UnitCost") || 0),
+                    extCost: Number(getF(d, "ExtCost") || getF(d, "Amount") || 0),
+                    uom: getF(d, "UOM"),
+                    warehouseId: getF(d, "WarehouseID") || getF(d, "SiteID"),
+                })),
+            }));
+        } catch (err) {
+            console.error("[Acumatica PO Error]", err.message);
+            return [];
+        }
     }
+};
+
+const getF = (obj, keyName) => {
+    if (!obj) return "";
+    const k = Object.keys(obj).find(i => i.toLowerCase() === keyName.toLowerCase());
+    if (!k) return "";
+    const val = obj[k];
+    return (val?.value !== undefined ? val.value : val) ?? "";
 };
