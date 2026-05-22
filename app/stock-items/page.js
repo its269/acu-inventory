@@ -35,7 +35,7 @@ export default function StockItemsPage() {
     const [selectedId, setSelectedId] = useState(null);
 
     useEffect(() => {
-        const t = setTimeout(() => setDebouncedSearch(search), 350);
+        const t = setTimeout(() => setDebouncedSearch(search), 300);
         return () => clearTimeout(t);
     }, [search]);
 
