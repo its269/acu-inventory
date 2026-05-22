@@ -54,6 +54,7 @@ export default function SalesPage() {
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState("");
     const [salesDays, setSalesDays] = useState(90);
+    const [searchQuery, setSearchQuery] = useState("");
 
     const [fromDate, setFromDate] = useState(() => {
         const d = new Date();
@@ -81,29 +82,38 @@ export default function SalesPage() {
     }, []);
 
     /* ── Fetch sales analysis ───────────────────────────── */
-    const fetchSales = useCallback(async (from, to, branch) => {
+    const fetchSales = useCallback(async (from, to, branch, search) => {
         setLoading(true);
         setError("");
         setSalesData([]);
         setMonths([]);
         try {
-            const params = new URLSearchParams({ branch: branch ?? selectedBranch, startDate: from, endDate: to });
+            const params = new URLSearchParams({ 
+                branch: branch ?? selectedBranch, 
+                startDate: from ?? fromDate, 
+                endDate: to ?? toDate,
+                search: search ?? searchQuery
+            });
             const res = await fetch(`/api/sales-periodic?${params.toString()}`);
             if (res.status === 401) { router.push("/signin"); return; }
-            if (!res.ok) { setError("Failed to load sales history."); return; }
+            if (!res.ok) { 
+                const errData = await res.json().catch(() => ({}));
+                setError(errData.message || errData.error || "Failed to load sales history."); 
+                return; 
+            }
             const result = await res.json();
             setSalesData(result.data || []);
             setMonths(result.months || []);
             
-            const d1 = new Date(from);
-            const d2 = new Date(to);
+            const d1 = new Date(from ?? fromDate);
+            const d2 = new Date(to ?? toDate);
             setSalesDays(Math.round((d2 - d1) / (1000 * 60 * 60 * 24)));
         } catch {
             setError("Unable to connect to the server.");
         } finally {
             setLoading(false);
         }
-    }, [selectedBranch, router]);
+    }, [selectedBranch, fromDate, toDate, searchQuery, router]);
 
     /* ── Export CSV ─────────────────────────────────────── */
     const exportCSV = useCallback(() => {
@@ -141,9 +151,9 @@ export default function SalesPage() {
         const branch = e.target.value;
         setSelectedBranch(branch);
         if (salesData.length > 0) {
-            fetchSales(fromDate, toDate, branch);
+            fetchSales(fromDate, toDate, branch, searchQuery);
         }
-    }, [salesData.length, fromDate, toDate, fetchSales]);
+    }, [salesData.length, fromDate, toDate, searchQuery, fetchSales]);
 
     /* ── Derived summary ────────────────────────────────── */
     const totalQtySold = salesData.reduce((s, r) => s + r.totalQty, 0);
@@ -153,13 +163,26 @@ export default function SalesPage() {
         <div className="db-main">
             {/* ── Page title ─────────────────────────────── */}
             <div className="db-page-title">
-                <h1>Product Periodic Sales</h1>
-                <p>Analyze monthly sales trends across different branches.</p>
+                <h1>Last 3 Months Sales</h1>
+                <p>Analyze monthly sales trends across different branches directly from Acumatica.</p>
             </div>
 
             {/* ── Filter toolbar ─────────────────────────── */}
             <div className="db-toolbar">
                 <div className="db-toolbar-left">
+                    {/* Search filter */}
+                    <div className="db-search-wrapper" style={{ minWidth: "220px" }}>
+                        <svg className="db-search-icon" style={{ left: '1rem', position: 'absolute', color: '#64748b' }} xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
+                        <input
+                            type="text"
+                            className="db-search"
+                            placeholder="Invoice # or ID..."
+                            value={searchQuery}
+                            onChange={(e) => setSearchQuery(e.target.value)}
+                            onKeyDown={(e) => e.key === "Enter" && fetchSales(fromDate, toDate, selectedBranch, searchQuery)}
+                        />
+                    </div>
+
                     {/* Branch filter */}
                     <div className="db-select-wrapper">
                         <IconFilter />
@@ -198,7 +221,7 @@ export default function SalesPage() {
                 <div className="db-toolbar-right">
                     <button
                         className="db-btn-run-analysis"
-                        onClick={() => fetchSales(fromDate, toDate)}
+                        onClick={() => fetchSales(fromDate, toDate, selectedBranch, searchQuery)}
                         disabled={loading || !fromDate || !toDate}
                     >
                         <IconBarChart />

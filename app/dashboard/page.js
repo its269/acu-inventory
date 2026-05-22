@@ -129,7 +129,12 @@ export default function DashboardPage() {
     const [syncProgress, setSyncProgress] = useState({ current: 0, total: 27881, stage: "" });
     const [syncLogs, setSyncLogs] = useState([]);
     const [page, setPage] = useState(1);
-    const [userName, setUserName] = useState("");
+    const [userName, setUserName] = useState(() => {
+        if (typeof window !== "undefined") {
+            return localStorage.getItem("userName") || "User";
+        }
+        return "User";
+    });
     const [showSyncConfirm, setShowSyncConfirm] = useState(false);
 
     const searchTimer = useRef(null);
@@ -137,9 +142,6 @@ export default function DashboardPage() {
 
     /* ── Init Data ────────────────────────────────────────── */
     useEffect(() => {
-        const display = localStorage.getItem("userName") || "User";
-        setUserName(display);
-
         const fetchBranches = async () => {
             try {
                 const res = await fetch("/api/branches");

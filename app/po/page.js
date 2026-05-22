@@ -51,9 +51,14 @@ export default function POPage() {
     const [hasMore, setHasMore] = useState(false);
     const [search, setSearch] = useState("");
     const [debSearch, setDebSearch] = useState("");
+    const [startDate, setStartDate] = useState(""); // Empty by default to avoid 500 error on initial load
+    const [status, setStatus] = useState("Open");
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState(null);
     const [expanded, setExpanded] = useState({}); // orderNbr -> bool
+
+    // Current month/year for display hint
+    const currentMonthYear = new Date().toLocaleDateString("en-PH", { month: "long", year: "numeric" });
 
     useEffect(() => {
         const t = setTimeout(() => setDebSearch(search), 350);
@@ -62,13 +67,18 @@ export default function POPage() {
 
     useEffect(() => {
         Promise.resolve().then(() => setPage(1));
-    }, [debSearch]);
+    }, [debSearch, startDate, status]);
 
     const fetchOrders = useCallback(async () => {
         setLoading(true);
         setError(null);
         try {
-            const params = new URLSearchParams({ page: String(page), pageSize: String(PAGE_SIZE) });
+            const params = new URLSearchParams({
+                page: String(page),
+                pageSize: String(PAGE_SIZE),
+                startDate: startDate,
+                status: status
+            });
             if (debSearch) params.set("search", debSearch);
             const res = await fetch(`/api/po?${params}`);
             if (!res.ok) {
@@ -83,7 +93,7 @@ export default function POPage() {
         } finally {
             setLoading(false);
         }
-    }, [page, debSearch]);
+    }, [page, debSearch, startDate, status]);
 
     useEffect(() => {
         const controller = new AbortController();
@@ -107,12 +117,56 @@ export default function POPage() {
                 {/* Toolbar */}
                 <div className="db-toolbar">
                     <div className="db-toolbar-left">
+                        <div className="db-select-wrapper" style={{ paddingLeft: '1rem', paddingRight: '0.8rem', minWidth: 'fit-content' }}>
+                            <span style={{ fontSize: '0.8rem', fontWeight: '700', color: '#64748b', marginRight: '0.5rem' }}>From:</span>
+                            <input
+                                type="date"
+                                className="db-select"
+                                style={{ width: '135px', padding: '0 0.5rem', marginRight: '0.5rem' }}
+                                value={startDate}
+                                onChange={(e) => setStartDate(e.target.value)}
+                            />
+                            {!startDate && (
+                                <span style={{ fontSize: '0.75rem', color: '#94a3b8', fontStyle: 'italic', marginRight: '1rem' }}>
+                                    Default: {currentMonthYear}
+                                </span>
+                            )}
+
+                            <span style={{ fontSize: '0.8rem', fontWeight: '700', color: '#64748b', marginRight: '0.5rem' }}>Status:</span>
+                            <select
+                                className="db-select"
+                                style={{ width: '150px', padding: '0 0.5rem', marginRight: '0.5rem' }}
+                                value={status}
+                                onChange={(e) => setStatus(e.target.value)}
+                            >
+                                <option value="">All Statuses</option>
+                                <option value="Hold">Hold</option>
+                                <option value="Open">Open</option>
+                                <option value="Balanced">Balanced</option>
+                                <option value="Pending Approval">Pending Approval</option>
+                                <option value="Pending Printing">Pending Printing</option>
+                                <option value="Pending Email">Pending Email</option>
+                                <option value="Completed">Completed</option>
+                                <option value="Cancelled">Cancelled</option>
+                                <option value="Closed">Closed</option>
+                            </select>
+
+                            {(startDate || status) && (
+                                <button
+                                    onClick={() => { setStartDate(""); setStatus(""); }}
+                                    style={{ background: '#fee2e2', border: 'none', color: '#ef4444', fontSize: '0.75rem', cursor: 'pointer', padding: '4px 10px', borderRadius: '4px', fontWeight: '600' }}
+                                    title="Clear all filters"
+                                >
+                                    Clear Filters
+                                </button>
+                            )}
+                        </div>
                         <div className="db-search-wrapper">
                             <IconSearch />
                             <input
                                 className="db-search"
                                 type="text"
-                                placeholder="Search by Order #, Vendor, or Description…"
+                                placeholder="Search by Order #..."
                                 value={search}
                                 onChange={e => setSearch(e.target.value)}
                             />
