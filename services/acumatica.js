@@ -329,21 +329,21 @@ export const AcumaticaService = {
     async fetchSalesInvoicesByDateRange({ cookie, startDate, endDate }) {
         const results = [];
         const filter = `Date ge datetimeoffset'${startDate}T00:00:00Z' and Date le datetimeoffset'${endDate}T23:59:59Z'`;
-        
+
         try {
             console.log(`>>> [Acumatica] Searching SalesInvoice: ${filter}`);
             let url = `${ACU_BASE}/SalesInvoice?$expand=Details&$top=500&$filter=${filter}`;
             let res = await this.fetchWithRetry(url, cookie);
             let data = await res.json();
             let items = data.value || (Array.isArray(data) ? data : []);
-            
+
             if (items.length > 0) return items;
 
             url = `${ACU_BASE}/Invoice?$expand=Details&$top=500&$filter=${filter}`;
             res = await this.fetchWithRetry(url, cookie);
             data = await res.json();
             items = data.value || (Array.isArray(data) ? data : []);
-            
+
             if (items.length > 0) return items;
 
             url = `${ACU_BASE}/Invoice?$expand=Details&$top=100&$orderby=Date desc`;
@@ -360,7 +360,7 @@ export const AcumaticaService = {
     async getPurchaseOrders({ page = 1, pageSize = 50, search = "", cookie, startDate, status = "" }) {
         const skip = (page - 1) * pageSize;
         let filterParts = [];
-        
+
         if (startDate) {
             filterParts.push(`Date ge datetime'${startDate}T00:00:00'`);
         }
@@ -376,7 +376,7 @@ export const AcumaticaService = {
 
         const filter = filterParts.length > 0 ? `$filter=${filterParts.join(" and ")}&` : "";
         const url = `${ACU_BASE}/PurchaseOrder?${filter}$expand=Details&$orderby=Date desc&$top=${pageSize}&$skip=${skip}`;
-        
+
         console.log(`[Acumatica PO] Fetching: ${url}`);
         const res = await this.fetchWithRetry(url, cookie);
         const data = await res.json();
@@ -422,5 +422,7 @@ const getF = (obj, keyName) => {
     const k = Object.keys(obj).find(i => i.toLowerCase() === keyName.toLowerCase());
     if (!k) return "";
     const val = obj[k];
-    return (val?.value !== undefined ? val.value : val) ?? "";
+    if (val === null || val === undefined) return "";
+    if (typeof val === "object") return val.value ?? "";
+    return val;
 };
