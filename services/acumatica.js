@@ -68,8 +68,7 @@ export const AcumaticaService = {
         for (let skip = 0; skip < 20000; skip += pageSize) {
             const sep = url.includes("?") ? "&" : "?";
             const fullUrl = `${url}${sep}$top=${pageSize}&$skip=${skip}`;
-            
-            console.log(`[Acumatica] Fetching: ${fullUrl}`);
+
             const res = await this.fetchWithRetry(fullUrl, cookie);
             const data = await res.json();
             const items = data.value ?? data.d?.results ?? (Array.isArray(data) ? data : []);
@@ -217,7 +216,6 @@ export const AcumaticaService = {
 
     /** ── BRANCHES: Get Actual Branch IDs ── */
     async getRealBranches(cookie) {
-        // Try Warehouse endpoint (Branch endpoint not available on this API version)
         try {
             const url = `${ACU_BASE}/Warehouse?$select=WarehouseID,Description`;
             const res = await this.fetchWithRetry(url, cookie);
@@ -311,26 +309,51 @@ export const AcumaticaService = {
         return { data: rows, days, startDate: toISODate(start), endDate: toISODate(end) };
     },
 
-    /** ── PERIODIC SALES: Get Data from SalesInvoice ── */
-    async getPeriodicSales({ cookie, branch, startDate, endDate, search }) {
+    /** ── PERIODIC SALES: Get Data from GI640113 ── */
+    async getPeriodicSales({ cookie, branch, startDate, endDate, top = 1000, skip = 0 }) {
+        let url = `${ACU_BASE}/GI640113?$top=${top}&$skip=${skip}`;
         let filterParts = [];
-        if (startDate) filterParts.push(`Date ge datetime'${startDate}T00:00:00'`);
-        if (endDate) filterParts.push(`Date le datetime'${endDate}T23:59:59'`);
-        if (branch) filterParts.push(`Branch eq '${branch.replace(/'/g, "''")}'`);
-        if (search) {
-            const s = search.replace(/'/g, "''");
-            filterParts.push(`(substringof('${s}', ReferenceNbr) or substringof('${s}', CustomerID))`);
-        }
+        if (startDate) filterParts.push(`DocumentDate ge datetime'${startDate}T00:00:00'`);
+        if (endDate) filterParts.push(`DocumentDate le datetime'${endDate}T23:59:59'`);
+        if (branch) filterParts.push(`BranchName eq '${branch.replace(/'/g, "''")}'`);
 
-        // The user specifically requested this endpoint structure
-        let url = `${ACU_BASE}/SalesInvoice?$expand=Details`;
         if (filterParts.length > 0) {
             url += `&$filter=${filterParts.join(" and ")}`;
         }
 
-        // Reduced pageSize to avoid timeouts with expanded Details
-        const invoices = await this.fetchAllPages(url, cookie, 20);
-        return invoices;
+        const res = await this.fetchWithRetry(url, cookie);
+        const data = await res.json();
+        return data.value || [];
+    },
+
+    async fetchSalesInvoicesByDateRange({ cookie, startDate, endDate }) {
+        const results = [];
+        const filter = `Date ge datetimeoffset'${startDate}T00:00:00Z' and Date le datetimeoffset'${endDate}T23:59:59Z'`;
+        
+        try {
+            console.log(`>>> [Acumatica] Searching SalesInvoice: ${filter}`);
+            let url = `${ACU_BASE}/SalesInvoice?$expand=Details&$top=500&$filter=${filter}`;
+            let res = await this.fetchWithRetry(url, cookie);
+            let data = await res.json();
+            let items = data.value || (Array.isArray(data) ? data : []);
+            
+            if (items.length > 0) return items;
+
+            url = `${ACU_BASE}/Invoice?$expand=Details&$top=500&$filter=${filter}`;
+            res = await this.fetchWithRetry(url, cookie);
+            data = await res.json();
+            items = data.value || (Array.isArray(data) ? data : []);
+            
+            if (items.length > 0) return items;
+
+            url = `${ACU_BASE}/Invoice?$expand=Details&$top=100&$orderby=Date desc`;
+            res = await this.fetchWithRetry(url, cookie);
+            data = await res.json();
+            return data.value || [];
+
+        } catch (err) {
+            return [];
+        }
     },
 
     /** ── PURCHASE ORDERS: Get Data ── */
@@ -338,8 +361,6 @@ export const AcumaticaService = {
         const skip = (page - 1) * pageSize;
         let filterParts = [];
         
-        // We remove the hardcoded 2026 filter to resolve the persistent 500 error.
-        // The 'orderby=Date desc' will naturally bring the most recent records to the top.
         if (startDate) {
             filterParts.push(`Date ge datetime'${startDate}T00:00:00'`);
         }
@@ -371,16 +392,6 @@ export const AcumaticaService = {
 
     /** ── PURCHASE ORDERS: Transform ── */
     transformPurchaseOrder(po) {
-        const getF = (obj, key) => {
-            if (!obj) return "";
-            const k = Object.keys(obj).find(i => i.toLowerCase() === key.toLowerCase());
-            if (!k) return "";
-            const val = obj[k];
-            const raw = (val?.value !== undefined ? val.value : val) ?? "";
-            if (raw !== null && typeof raw === "object") return "";
-            return raw;
-        };
-
         return {
             orderType: getF(po, "OrderType"),
             orderNbr: getF(po, "OrderNbr"),
@@ -404,4 +415,12 @@ export const AcumaticaService = {
             })),
         };
     }
+};
+
+const getF = (obj, keyName) => {
+    if (!obj) return "";
+    const k = Object.keys(obj).find(i => i.toLowerCase() === keyName.toLowerCase());
+    if (!k) return "";
+    const val = obj[k];
+    return (val?.value !== undefined ? val.value : val) ?? "";
 };
