@@ -216,7 +216,6 @@ export const AcumaticaService = {
 
     /** ── BRANCHES: Get Actual Branch IDs ── */
     async getRealBranches(cookie) {
-        // Try Warehouse endpoint (Branch endpoint not available on this API version)
         try {
             const url = `${ACU_BASE}/Warehouse?$select=WarehouseID,Description`;
             const res = await this.fetchWithRetry(url, cookie);
@@ -357,32 +356,64 @@ export const AcumaticaService = {
         }
     },
 
-    async getIncomingPO(cookie) {
-        try {
-            const url = `${ACU_BASE}/PurchaseOrder?$expand=Details&$filter=Status eq 'Open' or Status eq 'Balanced'`;
-            const res = await this.fetchWithRetry(url, cookie);
-            const data = await res.json();
-            const pos = data.value || (Array.isArray(data) ? data : []);
-
-            return pos.map(po => ({
-                orderNbr: getF(po, "OrderNbr"),
-                status: getF(po, "Status"),
-                vendor: getF(po, "VendorID") || getF(po, "Vendor"),
-                orderDate: getF(po, "Date") || getF(po, "OrderDate"),
-                details: (po.Details || []).map(d => ({
-                    inventoryId: getF(d, "InventoryID"),
-                    description: getF(d, "Description") || getF(d, "TransactionDescr"),
-                    qty: Number(getF(d, "OrderQty") || getF(d, "Qty") || 0),
-                    unitCost: Number(getF(d, "UnitCost") || 0),
-                    extCost: Number(getF(d, "ExtCost") || getF(d, "Amount") || 0),
-                    uom: getF(d, "UOM"),
-                    warehouseId: getF(d, "WarehouseID") || getF(d, "SiteID"),
-                })),
-            }));
-        } catch (err) {
-            console.error("[Acumatica PO Error]", err.message);
-            return [];
+    /** ── PURCHASE ORDERS: Get Data ── */
+    async getPurchaseOrders({ page = 1, pageSize = 50, search = "", cookie, startDate, status = "" }) {
+        const skip = (page - 1) * pageSize;
+        let filterParts = [];
+        
+        if (startDate) {
+            filterParts.push(`Date ge datetime'${startDate}T00:00:00'`);
         }
+
+        if (status) {
+            filterParts.push(`Status eq '${status}'`);
+        }
+
+        if (search) {
+            const s = search.replace(/'/g, "''");
+            filterParts.push(`substringof('${s}', OrderNbr)`);
+        }
+
+        const filter = filterParts.length > 0 ? `$filter=${filterParts.join(" and ")}&` : "";
+        const url = `${ACU_BASE}/PurchaseOrder?${filter}$expand=Details&$orderby=Date desc&$top=${pageSize}&$skip=${skip}`;
+        
+        console.log(`[Acumatica PO] Fetching: ${url}`);
+        const res = await this.fetchWithRetry(url, cookie);
+        const data = await res.json();
+        const raw = data.value || (Array.isArray(data) ? data : []);
+
+        const orders = raw.map(po => this.transformPurchaseOrder(po));
+
+        return {
+            orders,
+            hasMore: raw.length === pageSize
+        };
+    },
+
+    /** ── PURCHASE ORDERS: Transform ── */
+    transformPurchaseOrder(po) {
+        return {
+            orderType: getF(po, "OrderType"),
+            orderNbr: getF(po, "OrderNbr"),
+            vendorId: getF(po, "VendorID"),
+            vendorName: getF(po, "VendorName") || getF(po, "VendorRef"),
+            status: getF(po, "Status"),
+            date: getF(po, "Date") || getF(po, "OrderDate"),
+            promisedOn: getF(po, "PromisedOn") || getF(po, "PromisedDate"),
+            description: getF(po, "Description"),
+            totalQty: Number(getF(po, "ControlQty") || getF(po, "OrderQty") || 0),
+            totalAmount: Number(getF(po, "ControlTotal") || getF(po, "OrderTotal") || getF(po, "Amount") || 0),
+            lineCount: (po.Details || []).length,
+            lines: (po.Details || []).map(d => ({
+                inventoryId: getF(d, "InventoryID"),
+                description: getF(d, "Description") || getF(d, "TransactionDescr"),
+                qty: Number(getF(d, "OrderQty") || getF(d, "Qty") || 0),
+                unitCost: Number(getF(d, "UnitCost") || 0),
+                extCost: Number(getF(d, "ExtCost") || getF(d, "Amount") || 0),
+                uom: getF(d, "UOM"),
+                warehouseId: getF(d, "WarehouseID") || getF(d, "SiteID"),
+            })),
+        };
     }
 };
 

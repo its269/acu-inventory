@@ -146,6 +146,7 @@ export async function GET(request) {
 
     } catch (err) {
         console.error("[Periodic Sales API Error]", err);
+        if (err.message === "Unauthorized") return NextResponse.json({ message: "Unauthorized" }, { status: 401 });
         return NextResponse.json({ message: "Failed to fetch periodic sales", error: err.message }, { status: 500 });
     }
 }
