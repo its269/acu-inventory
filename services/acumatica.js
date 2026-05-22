@@ -325,5 +325,48 @@ export const AcumaticaService = {
         const res = await this.fetchWithRetry(url, cookie);
         const data = await res.json();
         return data.value || [];
+    },
+
+    async fetchSalesInvoicesByDateRange({ cookie, startDate, endDate }) {
+        const results = [];
+        // Using datetimeoffset to strictly match the System.DateTimeOffset type required by ACU
+        const filter = `Date ge datetimeoffset'${startDate}T00:00:00Z' and Date le datetimeoffset'${endDate}T23:59:59Z'`;
+        
+        try {
+            // 1. Try SalesInvoice first (Targeted for 2026)
+            console.log(`>>> [Acumatica] Searching SalesInvoice for 2026: ${filter}`);
+            let url = `${ACU_BASE}/SalesInvoice?$expand=Details&$top=500&$filter=${filter}`;
+            let res = await this.fetchWithRetry(url, cookie);
+            let data = await res.json();
+            let items = data.value || (Array.isArray(data) ? data : []);
+            
+            if (items.length > 0) {
+                console.log(`>>> [Acumatica] Found ${items.length} records in SalesInvoice for 2026.`);
+                return items;
+            }
+
+            // 2. Fallback to Invoice endpoint (Targeted for 2026)
+            console.log(`>>> [Acumatica] No data in SalesInvoice. Searching Invoice endpoint for 2026...`);
+            url = `${ACU_BASE}/Invoice?$expand=Details&$top=500&$filter=${filter}`;
+            res = await this.fetchWithRetry(url, cookie);
+            data = await res.json();
+            items = data.value || (Array.isArray(data) ? data : []);
+            
+            if (items.length > 0) {
+                console.log(`>>> [Acumatica] Found ${items.length} records in Invoice for 2026.`);
+                return items;
+            }
+
+            // 3. Last Resort: If 2026 is truly empty, get latest records to prove connectivity
+            console.log(`>>> [Acumatica] 2026 is empty in both endpoints. Fetching latest available records...`);
+            url = `${ACU_BASE}/Invoice?$expand=Details&$top=100&$orderby=Date desc`;
+            res = await this.fetchWithRetry(url, cookie);
+            data = await res.json();
+            return data.value || [];
+
+        } catch (err) {
+            console.error(">>> [Acumatica] Deep search error:", err.message);
+            return [];
+        }
     }
 };

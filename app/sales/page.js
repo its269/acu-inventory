@@ -4,63 +4,36 @@ import { useState, useCallback, useEffect, memo, Fragment } from "react";
 import { useRouter } from "next/navigation";
 import "@/styles/dashboard.css";
 
-/* ── SVG Icons ─────────────────────────────────────────── */
-const IconBarChart = memo(() => (
-    <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round">
-        <line x1="18" y1="20" x2="18" y2="10" /><line x1="12" y1="20" x2="12" y2="4" /><line x1="6" y1="20" x2="6" y2="14" />
-        <line x1="2" y1="20" x2="22" y2="20" />
-    </svg>
-));
-IconBarChart.displayName = "IconBarChart";
+/* ── SVG Icons ───────────────────────────────────── */
+const CalendarIcon = () => (
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"></rect><line x1="16" y1="2" x2="16" y2="6"></line><line x1="8" y1="2" x2="8" y2="6"></line><line x1="3" y1="10" x2="21" y2="10"></line></svg>
+);
+const DownloadIcon = () => (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
+);
+const BranchIcon = () => (
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"></path><circle cx="12" cy="10" r="3"></circle></svg>
+);
 
-const IconExport = memo(() => (
-    <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round">
-        <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
-        <polyline points="7 10 12 15 17 10" /><line x1="12" y1="15" x2="12" y2="3" />
-    </svg>
-));
-IconExport.displayName = "IconExport";
+const monthNames = [
+    "January", "February", "March", "April", "May", "June",
+    "July", "August", "September", "October", "November", "December"
+];
 
-const IconFilter = memo(() => (
-    <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round">
-        <polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3" />
-    </svg>
-));
-IconFilter.displayName = "IconFilter";
+const currentYear = new Date().getFullYear();
+const years = Array.from({ length: 6 }, (_, i) => currentYear - i);
 
-const IconChevron = memo(() => (
-    <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-        <polyline points="6 9 12 15 18 9" />
-    </svg>
-));
-IconChevron.displayName = "IconChevron";
-
-/* ── Pure helpers ───────────────────────────────────────── */
-const formatDateInput = (date) => {
-    const year = date.getFullYear();
-    const month = String(date.getMonth() + 1).padStart(2, "0");
-    const day = String(date.getDate()).padStart(2, "0");
-    return `${year}-${month}-${day}`;
-};
-
-export default function SalesPage() {
+export default function SalesPeriodicPage() {
     const router = useRouter();
-
-    /* ── State ──────────────────────────────────────────── */
     const [branchOptions, setBranchOptions] = useState([]);
     const [selectedBranch, setSelectedBranch] = useState("");
     const [salesData, setSalesData] = useState([]);
     const [months, setMonths] = useState([]);
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState("");
-    const [salesDays, setSalesDays] = useState(90);
-
-    const [fromDate, setFromDate] = useState(() => {
-        const d = new Date();
-        d.setMonth(d.getMonth() - 3);
-        return formatDateInput(d);
-    });
-    const [toDate, setToDate] = useState(formatDateInput(new Date()));
+    
+    const [targetMonth, setTargetMonth] = useState(new Date().getMonth() + 1);
+    const [targetYear, setTargetYear] = useState(currentYear);
 
     /* ── Fetch branches ─────────────────────────────────── */
     useEffect(() => {
@@ -73,37 +46,35 @@ export default function SalesPage() {
                     const names = list.map((b) => b.SiteID || b.BranchName?.value || b.BranchID?.value).filter(Boolean);
                     setBranchOptions([...new Set(names)].sort());
                 }
-            } catch {
-                // non-fatal
-            }
+            } catch { }
         };
         fetchBranches();
     }, []);
 
     /* ── Fetch sales analysis ───────────────────────────── */
-    const fetchSales = useCallback(async (from, to, branch) => {
+    const fetchSales = useCallback(async () => {
         setLoading(true);
         setError("");
         setSalesData([]);
         setMonths([]);
         try {
-            const params = new URLSearchParams({ branch: branch ?? selectedBranch, startDate: from, endDate: to });
+            const params = new URLSearchParams({ 
+                branch: selectedBranch, 
+                month: targetMonth.toString(),
+                year: targetYear.toString()
+            });
             const res = await fetch(`/api/sales-periodic?${params.toString()}`);
             if (res.status === 401) { router.push("/signin"); return; }
             if (!res.ok) { setError("Failed to load sales history."); return; }
             const result = await res.json();
             setSalesData(result.data || []);
             setMonths(result.months || []);
-            
-            const d1 = new Date(from);
-            const d2 = new Date(to);
-            setSalesDays(Math.round((d2 - d1) / (1000 * 60 * 60 * 24)));
         } catch {
             setError("Unable to connect to the server.");
         } finally {
             setLoading(false);
         }
-    }, [selectedBranch, router]);
+    }, [selectedBranch, targetMonth, targetYear, router]);
 
     /* ── Export CSV ─────────────────────────────────────── */
     const exportCSV = useCallback(() => {
@@ -131,183 +102,162 @@ export default function SalesPage() {
         const url = URL.createObjectURL(blob);
         const a = document.createElement("a");
         a.href = url;
-        a.download = `sales-periodic-${selectedBranch || "all"}-${fromDate}-to-${toDate}.csv`;
+        a.download = `sales-periodic-${selectedBranch || "all"}-${targetMonth}-${targetYear}.csv`;
         a.click();
         URL.revokeObjectURL(url);
-    }, [salesData, selectedBranch, fromDate, toDate, months]);
+    }, [salesData, selectedBranch, targetMonth, targetYear, months]);
 
-    /* ── Handle branch change ───────────────────────────── */
-    const handleBranchChange = useCallback((e) => {
-        const branch = e.target.value;
-        setSelectedBranch(branch);
-        if (salesData.length > 0) {
-            fetchSales(fromDate, toDate, branch);
-        }
-    }, [salesData.length, fromDate, toDate, fetchSales]);
-
-    /* ── Derived summary ────────────────────────────────── */
     const totalQtySold = salesData.reduce((s, r) => s + r.totalQty, 0);
     const totalAmountSold = salesData.reduce((s, r) => s + r.totalSales, 0);
 
     return (
-        <div className="db-main">
-            {/* ── Page title ─────────────────────────────── */}
-            <div className="db-page-title">
-                <h1>Product Periodic Sales</h1>
-                <p>Analyze monthly sales trends across different branches.</p>
-            </div>
-
-            {/* ── Filter toolbar ─────────────────────────── */}
-            <div className="db-toolbar">
-                <div className="db-toolbar-left">
-                    {/* Branch filter */}
-                    <div className="db-select-wrapper">
-                        <IconFilter />
-                        <select className="db-select" value={selectedBranch} onChange={handleBranchChange}>
-                            <option value="">All Branches</option>
-                            {branchOptions.map((b) => <option key={b} value={b}>{b}</option>)}
-                        </select>
-                        <IconChevron />
+        <main className="db-main">
+            <header className="db-page-title">
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                    <div>
+                        <h1>Product Periodic Sales</h1>
+                        <p>3-Month Comparative Sales Analysis based on Target Month</p>
                     </div>
-
-                    {/* Date range */}
-                    <div className="db-sales3m-filter-row" style={{ gap: "0.5rem", alignItems: "flex-end" }}>
-                        <div className="db-sales3m-filter-group">
-                            <label>From</label>
-                            <input
-                                type="date"
-                                value={fromDate}
-                                max={toDate}
-                                onChange={(e) => setFromDate(e.target.value)}
-                            />
-                        </div>
-                        <span className="db-sales3m-filter-arrow">→</span>
-                        <div className="db-sales3m-filter-group">
-                            <label>To</label>
-                            <input
-                                type="date"
-                                value={toDate}
-                                min={fromDate}
-                                max={formatDateInput(new Date())}
-                                onChange={(e) => setToDate(e.target.value)}
-                            />
-                        </div>
-                    </div>
-                </div>
-
-                <div className="db-toolbar-right">
-                    <button
-                        className="db-btn-run-analysis"
-                        onClick={() => fetchSales(fromDate, toDate)}
-                        disabled={loading || !fromDate || !toDate}
-                    >
-                        <IconBarChart />
-                        <span>{loading ? "Loading…" : "Run Analysis"}</span>
+                    <button className="db-action-btn" onClick={exportCSV} disabled={salesData.length === 0}>
+                        <DownloadIcon /> Export CSV
                     </button>
-                    {salesData.length > 0 && !loading && (
-                        <button className="db-action-btn" onClick={exportCSV}>
-                            <IconExport /><span>Export CSV</span>
-                        </button>
-                    )}
                 </div>
-            </div>
+            </header>
 
-            {/* ── Error ──────────────────────────────────── */}
-            {error && (
-                <div className="db-error-card">
-                    <div className="db-error-body">
-                        <p className="db-error-title">{error}</p>
-                        <p className="db-error-msg">Check your connection or try a different date range.</p>
+            <section className="db-sales3m-filter-panel" style={{ borderRadius: '16px', border: '1px solid #e2e8f0' }}>
+                <div className="db-sales3m-filter-row">
+                    <div className="db-sales3m-filter-group">
+                        <label><CalendarIcon /> Target Month</label>
+                        <div className="db-select-wrapper" style={{ minWidth: '180px' }}>
+                            <select 
+                                className="db-select" 
+                                value={targetMonth} 
+                                onChange={(e) => setTargetMonth(parseInt(e.target.value))}
+                            >
+                                {monthNames.map((name, i) => (
+                                    <option key={name} value={i + 1}>{name}</option>
+                                ))}
+                            </select>
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><path d="m6 9 6 6 6-9"/></svg>
+                        </div>
                     </div>
-                    <button className="db-error-retry" onClick={() => fetchSales(fromDate, toDate)}>Retry</button>
-                </div>
-            )}
 
-            {/* ── Loading ────────────────────────────────── */}
-            {loading && (
+                    <div className="db-sales3m-filter-group">
+                        <label>Year</label>
+                        <div className="db-select-wrapper" style={{ minWidth: '120px' }}>
+                            <select 
+                                className="db-select" 
+                                value={targetYear} 
+                                onChange={(e) => setTargetYear(parseInt(e.target.value))}
+                            >
+                                {years.map(y => (
+                                    <option key={y} value={y}>{y}</option>
+                                ))}
+                            </select>
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><path d="m6 9 6 6 6-9"/></svg>
+                        </div>
+                    </div>
+
+                    <div className="db-sales3m-filter-group">
+                        <label><BranchIcon /> Branch / Warehouse</label>
+                        <div className="db-select-wrapper" style={{ minWidth: '220px' }}>
+                            <select className="db-select" value={selectedBranch} onChange={(e) => setSelectedBranch(e.target.value)}>
+                                <option value="">All Branches</option>
+                                {branchOptions.map((b) => (
+                                    <option key={b} value={b}>{b}</option>
+                                ))}
+                            </select>
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><path d="m6 9 6 6 6-9"/></svg>
+                        </div>
+                    </div>
+
+                    <button className="db-btn-run-analysis" onClick={fetchSales} disabled={loading}>
+                        {loading ? "Analyzing..." : "Run Analysis"}
+                    </button>
+                </div>
+            </section>
+
+            {error && <div className="db-error-card"><div className="db-error-body"><div className="db-error-title">Error</div><div className="db-error-msg">{error}</div></div></div>}
+
+            {loading ? (
                 <div className="db-loading">
-                    <div className="db-spinner" />
-                    <span>Fetching sales data for {fromDate} → {toDate}…</span>
+                    <div className="db-spinner db-spinner-lg"></div>
+                    <p>Fetching real-time data from Acumatica...</p>
                 </div>
-            )}
-
-            {/* ── Empty state ────────────────────────────── */}
-            {!loading && !error && salesData.length === 0 && (
-                <div className="db-empty" style={{ marginTop: "4rem" }}>
-                    <IconBarChart />
-                    <p>No data yet</p>
-                    <span>Select a date range and click <strong>Run Analysis</strong> to view sales data.</span>
-                </div>
-            )}
-
-            {/* ── Results ────────────────────────────────── */}
-            {!loading && salesData.length > 0 && (
+            ) : (
                 <>
-                    {/* Summary cards */}
-                    <div className="db-sales3m-summary">
-                        <div className="db-sales3m-card">
-                            <span className="db-sales3m-card-val">{salesData.length}</span>
-                            <span className="db-sales3m-card-label">Unique Products</span>
+                    {salesData.length > 0 && (
+                        <div className="db-stats">
+                            <div className="db-stat-card db-stat-blue">
+                                <span className="db-stat-label">Total Volume (3 Months)</span>
+                                <span className="db-stat-value">{totalQtySold.toLocaleString()}</span>
+                            </div>
+                            <div className="db-stat-card">
+                                <span className="db-stat-label">Total Revenue (3 Months)</span>
+                                <span className="db-stat-value">₱{totalAmountSold.toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
+                                <span className="db-stat-sub">Across {selectedBranch || 'all branches'}</span>
+                            </div>
                         </div>
-                        <div className="db-sales3m-card db-sales3m-card-blue">
-                            <span className="db-sales3m-card-val">{totalQtySold.toLocaleString("en-PH", { maximumFractionDigits: 0 })}</span>
-                            <span className="db-sales3m-card-label">Total Qty Sold</span>
-                        </div>
-                        <div className="db-sales3m-card db-sales3m-card-warn">
-                            <span className="db-sales3m-card-val">₱{(totalAmountSold/1000).toFixed(1)}K</span>
-                            <span className="db-sales3m-card-label">Total Revenue</span>
-                        </div>
-                        <div className="db-sales3m-card">
-                            <span className="db-sales3m-card-val">{months.length}</span>
-                            <span className="db-sales3m-card-label">Months Selected</span>
-                        </div>
-                    </div>
+                    )}
 
-                    {/* Data table */}
-                    <div className="db-sales3m-table-wrap">
-                        <table className="db-table db-sales3m-table">
+                    <div className="db-table-wrap">
+                        <table className="db-table">
                             <thead>
                                 <tr>
-                                    <th rowSpan="2">#</th>
-                                    <th rowSpan="2">Inventory ID</th>
-                                    <th rowSpan="2">Branch</th>
+                                    <th rowSpan={2} style={{ verticalAlign: 'middle' }}>Inventory ID</th>
+                                    <th rowSpan={2} style={{ verticalAlign: 'middle' }}>Branch</th>
+                                    <th rowSpan={2} style={{ verticalAlign: 'middle', width: '300px' }}>Description</th>
                                     {months.map(m => (
-                                        <th key={m.key} colSpan="2" className="db-centered-header">{m.label}</th>
+                                        <th key={m.key} colSpan={2} className="db-centered-header" style={{ textAlign: 'center' }}>
+                                            {m.label.toUpperCase()}
+                                        </th>
                                     ))}
-                                    <th colSpan="2" className="db-centered-header">Total Period</th>
+                                    <th rowSpan={2} className="db-num" style={{ borderLeft: '2px solid #e2e8f0', verticalAlign: 'middle', fontWeight: '800' }}>TOTAL QTY</th>
+                                    <th rowSpan={2} className="db-num" style={{ verticalAlign: 'middle', fontWeight: '800' }}>TOTAL SALES</th>
                                 </tr>
                                 <tr>
                                     {months.map(m => (
-                                        <Fragment key={m.key + "-sub"}>
-                                            <th className="db-num">Qty</th>
-                                            <th className="db-num">Sales</th>
+                                        <Fragment key={`${m.key}-sub`}>
+                                            <th className="db-num" style={{ background: '#f8fafc', fontSize: '0.65rem' }}>QTY</th>
+                                            <th className="db-num" style={{ background: '#f0f9ff', fontSize: '0.65rem' }}>SALES</th>
                                         </Fragment>
                                     ))}
-                                    <th className="db-num">Qty</th>
-                                    <th className="db-num">Sales</th>
                                 </tr>
                             </thead>
                             <tbody>
-                                {salesData.map((r, i) => (
-                                    <tr key={r.inventoryId + r.branchName + i}>
-                                        <td className="db-row-num">{i + 1}</td>
-                                        <td><span className="db-inv-id">{r.inventoryId}</span></td>
-                                        <td>{r.branchName}</td>
-                                        {months.map(m => (
-                                            <Fragment key={m.key + "-val"}>
-                                                <td className="db-num">{r.monthlyData[m.key]?.qty.toLocaleString() || 0}</td>
-                                                <td className="db-num">₱{r.monthlyData[m.key]?.sales.toLocaleString() || 0}</td>
-                                            </Fragment>
-                                        ))}
-                                        <td className="db-num"><strong>{r.totalQty.toLocaleString()}</strong></td>
-                                        <td className="db-num"><strong>₱{r.totalSales.toLocaleString()}</strong></td>
+                                {salesData.length === 0 ? (
+                                    <tr>
+                                        <td colSpan={5 + (months.length * 2)} className="db-empty" style={{ textAlign: 'center', padding: '4rem' }}>
+                                            <p>No data found for the selected period.</p>
+                                            <span>Try selecting a different month or year.</span>
+                                        </td>
                                     </tr>
-                                ))}
+                                ) : (
+                                    salesData.map((row) => (
+                                        <tr key={`${row.inventoryId}-${row.branchName}`}>
+                                            <td><code className="db-inv-id">{row.inventoryId}</code></td>
+                                            <td><span className="db-branch-tag">{row.branchName}</span></td>
+                                            <td className="db-desc">{row.description}</td>
+                                            {months.map(m => (
+                                                <Fragment key={m.key}>
+                                                    <td className="db-num">{(row.monthlyData[m.key]?.qty || 0).toLocaleString()}</td>
+                                                    <td className="db-num">₱{(row.monthlyData[m.key]?.sales || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}</td>
+                                                </Fragment>
+                                            ))}
+                                            <td className="db-num" style={{ borderLeft: '2px solid #e2e8f0', fontWeight: '700' }}>
+                                                {row.totalQty.toLocaleString()}
+                                            </td>
+                                            <td className="db-num" style={{ fontWeight: '700' }}>
+                                                ₱{row.totalSales.toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                                            </td>
+                                        </tr>
+                                    ))
+                                )}
                             </tbody>
                         </table>
                     </div>
                 </>
             )}
-        </div>
+        </main>
     );
 }
