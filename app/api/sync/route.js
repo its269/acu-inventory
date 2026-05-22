@@ -68,6 +68,17 @@ export async function POST(request) {
 
                 // â”€â”€ PHASE 1: INVENTORY â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
                 if (options.inventory) {
+                    // Get total items count for better progress distribution
+                    let totalItems = 3000; // Increased default
+                    try {
+                        const cRes = await AcumaticaService.fetchWithRetry(`${ACU_BASE}/StockItem?$count=true&$top=1`, cookie);
+                        const cData = await cRes.json();
+                        // Handle multiple possible count property names
+                        totalItems = parseInt(cData["@odata.count"] || cData["count"] || cData["d"]?.["__count"] || 0) || totalItems;
+                        console.log(`>>> [Sync] Total StockItems to sync: ${totalItems}`);
+                    } catch (e) {
+                        console.warn(">>> [Sync] Could not get StockItem count:", e.message);
+                    }
 
                     // 1a. Branches from Warehouse endpoint
                     send({ section: "Inventory", details: "Updating warehouse/branch list...", progress: 5 });
@@ -93,7 +104,7 @@ export async function POST(request) {
                             `${ACU_BASE}/StockItem?$top=100&$skip=${pSkip}`, cookie
                         );
                         const data = await res.json();
-                        const raw = data.value || [];
+                        const raw = data.value || (Array.isArray(data) ? data : []);
                         if (raw.length === 0) break;
 
                         const rows = raw.map(item => {
@@ -118,7 +129,13 @@ export async function POST(request) {
                         }
 
                         pSkip += raw.length;
-                        send({ section: "Inventory", details: `Products: ${pTotal} synced...`, progress: Math.min(44, 10 + Math.floor(pSkip / 20)) });
+                        
+                        // Dynamic expansion: if we hit the limit, push the "horizon" further
+                        if (pSkip >= totalItems) totalItems = pSkip + 500;
+
+                        // Progress 10% -> 40% (Range: 30%)
+                        const pProg = 10 + Math.floor((pSkip / totalItems) * 30);
+                        send({ section: "Inventory", details: `Products: ${pTotal} synced...`, progress: Math.min(44, pProg) });
                         await delay(250);
 
                         if (raw.length < 100) break; // last page
@@ -129,12 +146,15 @@ export async function POST(request) {
                     // 1c. Inventory levels (WarehouseDetails per item)
                     send({ section: "Inventory", details: "Syncing warehouse stock levels...", progress: 45 });
                     let lSkip = 0, lTotal = 0;
+                    // Reset totalItems if it was expanded too much, or use the real pTotal discovered
+                    if (pTotal > 0) totalItems = pTotal;
+
                     while (!signal.aborted) {
                         const res = await AcumaticaService.fetchWithRetry(
                             `${ACU_BASE}/StockItem?$expand=WarehouseDetails&$top=40&$skip=${lSkip}`, cookie
                         );
                         const data = await res.json();
-                        const raw = data.value || [];
+                        const raw = data.value || (Array.isArray(data) ? data : []);
                         if (raw.length === 0) break;
 
                         const levels = [];
@@ -144,10 +164,13 @@ export async function POST(request) {
                             const invId = String(getF(item, "InventoryID")).trim();
                             if (!invId) continue;
 
-                            const wds = item.WarehouseDetails
+                            let wds = item.WarehouseDetails
                                 ?? item.warehouseDetails
                                 ?? item.Warehouses
                                 ?? [];
+                            
+                            // Handle if expansion is wrapped in { value: [...] }
+                            if (wds && !Array.isArray(wds) && wds.value) wds = wds.value;
 
                             if (!Array.isArray(wds) || wds.length === 0) continue;
 
@@ -198,7 +221,11 @@ export async function POST(request) {
                         }
 
                         lSkip += raw.length;
-                        send({ section: "Inventory", details: `Stock levels: ${lTotal} rows...`, progress: Math.min(98, 45 + Math.floor(lSkip / 10)) });
+                        if (lSkip >= totalItems) totalItems = lSkip + 200;
+
+                        // Progress 45% -> 98% (Range: 53%)
+                        const lProg = 45 + Math.floor((lSkip / totalItems) * 53);
+                        send({ section: "Inventory", details: `Stock levels: ${lTotal} rows...`, progress: Math.min(99, lProg) });
                         await delay(250);
 
                         if (raw.length < 40) break; // last page
@@ -217,7 +244,8 @@ export async function POST(request) {
                     try {
                         const icRes = await AcumaticaService.fetchWithRetry(`${ACU_BASE}/ItemClass`, cookie);
                         const icData = await icRes.json();
-                        icMap = new Map((icData.value || []).map(ic => [
+                        const icRaw = icData.value || (Array.isArray(icData) ? icData : []);
+                        icMap = new Map(icRaw.map(ic => [
                             String(getF(ic, "ClassID")).toUpperCase().trim(),
                             String(getF(ic, "PostingClass")).trim()
                         ]));
@@ -230,7 +258,8 @@ export async function POST(request) {
                     try {
                         const pRes = await AcumaticaService.fetchWithRetry(`${ACU_BASE}/FinancialPeriod`, cookie);
                         const pData = await pRes.json();
-                        const rawPeriods = (pData.value || []).map(p => {
+                        const pRaw = pData.value || (Array.isArray(pData) ? pData : []);
+                        const rawPeriods = pRaw.map(p => {
                             const d = new Date(getF(p, "StartDate"));
                             let label = getF(p, "FinancialPeriodID") || getF(p, "PeriodID");
                             if (label && label.length >= 6) {
@@ -278,7 +307,7 @@ export async function POST(request) {
                                 `${ACU_BASE}/SalesInvoice?$expand=Details&$top=100&$skip=${sSkip}`, cookie
                             );
                             const data = await res.json();
-                            const invoices = data.value || [];
+                            const invoices = data.value || (Array.isArray(data) ? data : []);
                             if (invoices.length === 0) break;
 
                             const rows = [];
