@@ -183,7 +183,7 @@ export default function DashboardPage() {
         searchTimer.current = setTimeout(() => { 
             setDebouncedSearch(search); 
             setPage(1); 
-        }, 400);
+        }, 300);
         return () => clearTimeout(searchTimer.current);
     }, [search]);
 

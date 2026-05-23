@@ -298,25 +298,30 @@ export async function POST(request) {
                         totalExpected = parseInt(cData["@odata.count"] || cData["count"] || cData["d"]?.["__count"] || 0);
                     } catch (e) { }
 
-                    if (totalExpected <= 0) {
-                        totalExpected = 100000;
-                    }
+                    if (totalExpected <= 0) totalExpected = 100000;
 
-                    send({ 
-                        section: "Sales history", 
-                        details: `Fetching records...`, 
-                        progress: 5 
-                    });
+                    send({ section: "Sales history", details: `Fetching records...`, progress: 5 });
 
                     let sSkip = 0, sTotal = 0;
+                    let nextBatchPromise = AcumaticaService.fetchWithRetry(
+                        `${ACU_BASE}/SalesInvoice?$expand=Details&$top=500&$skip=${sSkip}`, cookie
+                    ).then(res => res.json());
+
                     while (!signal.aborted) {
                         try {
-                            const res = await AcumaticaService.fetchWithRetry(
-                                `${ACU_BASE}/SalesInvoice?$expand=Details&$top=200&$skip=${sSkip}`, cookie
-                            );
-                            const data = await res.json();
+                            const data = await nextBatchPromise;
                             const invoices = data.value || (Array.isArray(data) ? data : []);
                             if (invoices.length === 0) break;
+
+                            sSkip += invoices.length;
+                            
+                            if (!signal.aborted && invoices.length === 500) {
+                                nextBatchPromise = AcumaticaService.fetchWithRetry(
+                                    `${ACU_BASE}/SalesInvoice?$expand=Details&$top=500&$skip=${sSkip}`, cookie
+                                ).then(res => res.json());
+                            } else {
+                                nextBatchPromise = Promise.resolve({ value: [] });
+                            }
 
                             const rows = [];
                             for (const inv of invoices) {
@@ -347,28 +352,22 @@ export async function POST(request) {
                             }
 
                             if (rows.length > 0) {
-                                await sbWrite(`sales insert skip=${sSkip}`, () => 
+                                await sbWrite(`sales insert skip=${sSkip - invoices.length}`, () => 
                                     supabase.from("product_periodic_sales").insert(rows)
                                 );
                                 sTotal += rows.length;
                             }
 
-                            sSkip += invoices.length;
-                            
-                            if (sSkip >= totalExpected) {
-                                totalExpected = sSkip + 1000;
-                            }
+                            if (sSkip >= totalExpected) totalExpected = sSkip + 1000;
 
                             const calcProgress = 5 + Math.floor((sSkip / totalExpected) * 94);
-
                             send({
                                 section: "Sales history",
                                 details: `Synced ${sTotal.toLocaleString()} records...`,
                                 progress: Math.min(99, calcProgress)
                             });
-                            
-                            if (invoices.length < 200) break;
-                            await delay(20);
+
+                            if (invoices.length < 500) break;
                         } catch (err) {
                             if (err.message === "Unauthorized") throw err;
                             break;

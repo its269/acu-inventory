@@ -1,6 +1,7 @@
 "use client";
 
 import { Fragment, useState, useEffect, useCallback } from "react";
+import InventoryDetailModal from "@/components/InventoryDetailModal";
 import "@/styles/dashboard.css";
 import "@/styles/stock-items.css";
 import "@/styles/po.css";
@@ -56,6 +57,7 @@ export default function POPage() {
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState(null);
     const [expanded, setExpanded] = useState({}); // orderNbr -> bool
+    const [selectedId, setSelectedId] = useState(null);
 
     // Current month/year for display hint
     const currentMonthYear = new Date().toLocaleDateString("en-PH", { month: "long", year: "numeric" });
@@ -246,7 +248,14 @@ export default function POPage() {
                                                             <tbody>
                                                                 {po.lines.map((line, i) => (
                                                                     <tr key={i}>
-                                                                        <td><span className="si-id-chip si-id-chip-sm">{line.inventoryId || "—"}</span></td>
+                                                                        <td>
+                                                                            <span 
+                                                                                className="si-id-chip si-id-chip-sm si-clickable-id"
+                                                                                onClick={(e) => { e.stopPropagation(); setSelectedId(line.inventoryId); }}
+                                                                            >
+                                                                                {line.inventoryId || "—"}
+                                                                            </span>
+                                                                        </td>
                                                                         <td>{line.description || "—"}</td>
                                                                         <td>{line.warehouseId || "—"}</td>
                                                                         <td>{line.uom || "—"}</td>
@@ -283,6 +292,10 @@ export default function POPage() {
                     </div>
                 )}
             </div>
+
+            {selectedId && (
+                <InventoryDetailModal inventoryId={selectedId} onClose={() => setSelectedId(null)} />
+            )}
         </div>
     );
 }
