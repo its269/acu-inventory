@@ -84,22 +84,29 @@ export default function StockItemsPage() {
     const totalPages = Math.max(1, Math.ceil(totalCount / PAGE_SIZE));
 
     return (
-        <div className="si-root">
-            <div className="si-main">
+        <div className="db-root" style={{ display: 'block', background: '#f8fafc', minHeight: '100vh' }}>
+            <main className="db-main" style={{ maxWidth: '1400px' }}>
                 <div className="db-page-title">
-                    <h1>Stock Items</h1>
-                    <p>All products — click any item to view stock details across branches</p>
+                    <h1>Stock Items Masterlist</h1>
+                    <p>View all products and their configurations. Click a row to see detailed branch availability.</p>
                 </div>
 
-                <div className="si-summary-row">
-                    <span className="si-total-chip">
-                        {loading ? "Loading…" : `${totalCount.toLocaleString()} products`}
-                    </span>
+                <div className="db-stats">
+                    <div className="db-stat-card db-stat-blue">
+                        <span className="db-stat-label">Total Catalog</span>
+                        <span className="db-stat-value">{loading && totalCount === 0 ? "..." : totalCount.toLocaleString()}</span>
+                        <span className="db-stat-sub">Active Stock Items</span>
+                    </div>
+                    <div className="db-stat-card">
+                        <span className="db-stat-label">Current View</span>
+                        <span className="db-stat-value">{items.length}</span>
+                        <span className="db-stat-sub">Items on this page</span>
+                    </div>
                 </div>
 
                 <div className="db-toolbar">
                     <div className="db-toolbar-left">
-                        <div className="db-search-wrapper">
+                        <div className="db-search-wrapper" style={{ maxWidth: '600px' }}>
                             <IconSearch />
                             <input
                                 className="db-search"
@@ -110,6 +117,14 @@ export default function StockItemsPage() {
                             />
                         </div>
                     </div>
+                    <div className="db-toolbar-right">
+                        <button className="db-refresh-btn" onClick={() => fetchItems()} disabled={loading}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                                {loading && <div className="db-spinner" style={{ width: '14px', height: '14px', borderWidth: '2px' }}></div>}
+                                <span>{loading ? "Loading..." : "Refresh List"}</span>
+                            </div>
+                        </button>
+                    </div>
                 </div>
 
                 {error && <div className="si-error">{error}</div>}
@@ -118,25 +133,34 @@ export default function StockItemsPage() {
                     <table className="db-table">
                         <thead>
                             <tr>
-                                <th>Inventory ID</th>
+                                <th style={{ width: '200px' }}>Inventory ID</th>
                                 <th>Description</th>
-                                <th>Item Class</th>
+                                <th style={{ width: '250px' }}>Item Class</th>
+                                <th style={{ width: '120px', textAlign: 'center' }}>Action</th>
                             </tr>
                         </thead>
                         <tbody>
-                            {loading ? (
-                                <tr><td colSpan={3} className="si-loading-cell">Loading…</td></tr>
+                            {loading && items.length === 0 ? (
+                                <tr><td colSpan={4} className="si-loading-cell">
+                                    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '1rem' }}>
+                                        <div className="db-spinner db-spinner-lg"></div>
+                                        <span>Fetching items...</span>
+                                    </div>
+                                </td></tr>
                             ) : items.length === 0 ? (
-                                <tr><td colSpan={3} className="si-empty-cell">No items found.</td></tr>
+                                <tr><td colSpan={4} className="si-empty-cell">No items found matching your search.</td></tr>
                             ) : items.map(item => (
                                 <tr
                                     key={item.inventoryId}
-                                    className={`si-clickable-row ${selectedId === item.inventoryId ? "si-row-selected" : ""}`}
+                                    className={`db-clickable-row ${selectedId === item.inventoryId ? "si-row-selected" : ""}`}
                                     onClick={() => setSelectedId(item.inventoryId)}
                                 >
-                                    <td><span className="si-id-chip">{item.inventoryId}</span></td>
-                                    <td>{item.description}</td>
-                                    <td>{item.itemClass}</td>
+                                    <td><span className="db-inv-id">{item.inventoryId}</span></td>
+                                    <td className="db-desc" style={{ fontWeight: '500', color: '#0f172a' }}>{item.description}</td>
+                                    <td><span className="db-class-tag">{item.itemClass}</span></td>
+                                    <td style={{ textAlign: 'center' }}>
+                                        <button className="si-view-btn">View Details</button>
+                                    </td>
                                 </tr>
                             ))}
                         </tbody>
@@ -144,19 +168,22 @@ export default function StockItemsPage() {
                 </div>
 
                 {!loading && totalPages > 1 && (
-                    <div className="si-pagination">
-                        <span className="si-page-info">Page {page} of {totalPages}</span>
-                        <div className="si-page-buttons">
-                            <button className="si-page-btn" onClick={() => setPage(p => Math.max(1, p - 1))} disabled={page === 1}>
-                                <IconChevronLeft /> Prev
+                    <div className="db-pagination">
+                        <span className="db-page-info">
+                            Showing <strong>{((page - 1) * PAGE_SIZE) + 1}</strong> to <strong>{Math.min(page * PAGE_SIZE, totalCount)}</strong> of <strong>{totalCount}</strong> items
+                        </span>
+                        <div className="db-page-btns">
+                            <button className="db-page-btn" onClick={() => setPage(p => Math.max(1, p - 1))} disabled={page === 1}>
+                                <IconChevronLeft />
                             </button>
-                            <button className="si-page-btn" onClick={() => setPage(p => Math.min(totalPages, p + 1))} disabled={page === totalPages}>
-                                Next <IconChevronRight />
+                            <span className="db-page-dots">Page {page} of {totalPages}</span>
+                            <button className="db-page-btn" onClick={() => setPage(p => Math.min(totalPages, p + 1))} disabled={page === totalPages}>
+                                <IconChevronRight />
                             </button>
                         </div>
                     </div>
                 )}
-            </div>
+            </main>
 
             {selectedId && (
                 <InventoryDetailModal inventoryId={selectedId} onClose={() => setSelectedId(null)} />

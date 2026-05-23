@@ -149,36 +149,36 @@ export default function POPage() {
     const toggleExpand = (key) => setExpanded(prev => ({ ...prev, [key]: !prev[key] }));
 
     return (
-        <div className="si-root">
-            <div className="si-main">
-                {/* Header */}
+        <div className="db-root" style={{ display: 'block', background: '#f8fafc', minHeight: '100vh' }}>
+            <main className="db-main" style={{ maxWidth: '1400px' }}>
                 <div className="db-page-title">
-                    <h1>Incoming PO</h1>
-                    <p>Purchase orders fetched live from Acumatica ERP</p>
+                    <h1>Incoming Purchase Orders</h1>
+                    <p>Track and manage open purchase orders live from Acumatica ERP.</p>
                 </div>
 
-                {/* Toolbar */}
-                <div className="db-toolbar">
-                    <div className="db-toolbar-left">
-                        <div className="db-select-wrapper" style={{ paddingLeft: '1rem', paddingRight: '0.8rem', minWidth: 'fit-content' }}>
-                            <span style={{ fontSize: '0.8rem', fontWeight: '700', color: '#64748b', marginRight: '0.5rem' }}>From:</span>
+                <div className="db-toolbar" style={{ height: 'auto', padding: '1.25rem' }}>
+                    <div className="db-toolbar-left" style={{ flexWrap: 'wrap', gap: '1rem' }}>
+                        <div className="db-select-wrapper" style={{ paddingLeft: '0.75rem', paddingRight: '0.5rem', minWidth: 'fit-content', height: '42px' }}>
+                            <span style={{ fontSize: '0.75rem', fontWeight: '700', color: '#64748b', marginRight: '0.5rem', textTransform: 'uppercase' }}>From:</span>
                             <input
                                 type="date"
                                 className="db-select"
-                                style={{ width: '135px', padding: '0 0.5rem', marginRight: '0.5rem' }}
+                                style={{ width: '135px', padding: '0 0.25rem', height: '36px', fontSize: '0.8rem' }}
                                 value={startDate}
                                 onChange={(e) => setStartDate(e.target.value)}
                             />
                             {!startDate && (
-                                <span style={{ fontSize: '0.75rem', color: '#94a3b8', fontStyle: 'italic', marginRight: '1rem' }}>
-                                    Default: {currentMonthYear}
+                                <span style={{ fontSize: '0.7rem', color: '#94a3b8', fontStyle: 'italic', marginLeft: '0.5rem' }}>
+                                    (Current Month)
                                 </span>
                             )}
+                        </div>
 
-                            <span style={{ fontSize: '0.8rem', fontWeight: '700', color: '#64748b', marginRight: '0.5rem' }}>Status:</span>
+                        <div className="db-select-wrapper" style={{ paddingLeft: '0.75rem', paddingRight: '0.5rem', minWidth: 'fit-content', height: '42px' }}>
+                            <span style={{ fontSize: '0.75rem', fontWeight: '700', color: '#64748b', marginRight: '0.5rem', textTransform: 'uppercase' }}>Status:</span>
                             <select
                                 className="db-select"
-                                style={{ width: '150px', padding: '0 0.5rem', marginRight: '0.5rem' }}
+                                style={{ width: '140px', padding: '0 0.25rem', height: '36px', fontSize: '0.8rem' }}
                                 value={status}
                                 onChange={(e) => setStatus(e.target.value)}
                             >
@@ -193,116 +193,115 @@ export default function POPage() {
                                 <option value="Cancelled">Cancelled</option>
                                 <option value="Closed">Closed</option>
                             </select>
-
-                            {(startDate || status) && (
-                                <button
-                                    onClick={() => { setStartDate(""); setStatus(""); }}
-                                    style={{ background: '#fee2e2', border: 'none', color: '#ef4444', fontSize: '0.75rem', cursor: 'pointer', padding: '4px 10px', borderRadius: '4px', fontWeight: '600' }}
-                                    title="Clear all filters"
-                                >
-                                    Clear Filters
-                                </button>
-                            )}
                         </div>
-                        <div className="db-search-wrapper">
+
+                        {(startDate || status !== "Open") && (
+                            <button
+                                onClick={() => { setStartDate(""); setStatus("Open"); }}
+                                style={{ background: '#fee2e2', border: 'none', color: '#ef4444', fontSize: '0.7rem', cursor: 'pointer', padding: '6px 12px', borderRadius: '8px', fontWeight: '700', textTransform: 'uppercase' }}
+                            >
+                                Reset Filters
+                            </button>
+                        )}
+
+                        <div className="db-search-wrapper" style={{ flex: '1', minWidth: '250px', height: '42px' }}>
                             <IconSearch />
                             <input
                                 className="db-search"
                                 type="text"
-                                placeholder="Search by Order #..."
+                                placeholder="Search Order #..."
+                                style={{ height: '40px', fontSize: '0.85rem' }}
                                 value={search}
                                 onChange={e => setSearch(e.target.value)}
                             />
                         </div>
                     </div>
                     <div className="db-toolbar-right">
-                        <button className="si-page-btn" onClick={fetchOrders} disabled={loading}>
-                            {loading ? "Loading…" : "Refresh"}
+                        <button className="db-refresh-btn" onClick={() => fetchOrders()} disabled={loading}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                                {loading && <div className="db-spinner" style={{ width: '14px', height: '14px', borderWidth: '2px' }}></div>}
+                                <span>{loading ? "Loading..." : "Refresh"}</span>
+                            </div>
                         </button>
                     </div>
                 </div>
 
                 {error && <div className="si-error">{error}</div>}
 
-                {/* Table */}
                 <div className="db-table-wrap">
                     <table className="db-table po-table">
                         <thead>
                             <tr>
-                                <th style={{ width: 32 }}></th>
-                                <th>Order #</th>
+                                <th style={{ width: 40 }}></th>
+                                <th style={{ width: 140 }}>Order #</th>
                                 <th>Type</th>
                                 <th>Vendor</th>
-                                <th>Status</th>
+                                <th style={{ width: 150 }}>Status</th>
                                 <th>Order Date</th>
-                                <th>Promised</th>
-                                <th>Lines</th>
                                 <th style={{ textAlign: "right" }}>Total Amount</th>
                             </tr>
                         </thead>
                         <tbody>
-                            {loading ? (
-                                <tr><td colSpan={9} className="si-loading-cell">Loading…</td></tr>
+                            {loading && orders.length === 0 ? (
+                                <tr><td colSpan={7} className="si-loading-cell">
+                                    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '1rem' }}>
+                                        <div className="db-spinner db-spinner-lg"></div>
+                                        <span>Fetching orders...</span>
+                                    </div>
+                                </td></tr>
                             ) : orders.length === 0 ? (
-                                <tr><td colSpan={9} className="si-empty-cell">No purchase orders found.</td></tr>
+                                <tr><td colSpan={7} className="si-empty-cell">No purchase orders found for current filters.</td></tr>
                             ) : orders.map(po => {
                                 const key = `${po.orderType}-${po.orderNbr}`;
                                 const isOpen = !!expanded[key];
                                 return (
                                     <Fragment key={key}>
-                                        <tr className={`po-row ${isOpen ? "po-row-expanded" : ""}`} onClick={() => toggleExpand(key)} style={{ cursor: "pointer" }}>
+                                        <tr className={`db-clickable-row ${isOpen ? "po-row-expanded" : ""}`} onClick={() => toggleExpand(key)}>
                                             <td>
-                                                <span className={`po-expand-icon ${isOpen ? "po-expand-open" : ""}`}>
+                                                <span className={`po-expand-icon ${isOpen ? "po-expand-open" : ""}`} style={{ color: '#94a3b8' }}>
                                                     <IconChevronDown />
                                                 </span>
                                             </td>
-                                            <td><span className="si-id-chip">{po.orderNbr}</span></td>
-                                            <td>{po.orderType}</td>
+                                            <td><span className="db-inv-id" style={{ background: '#eff6ff', borderColor: '#dbeafe' }}>{po.orderNbr}</span></td>
+                                            <td><span style={{ fontSize: '0.75rem', fontWeight: '600', color: '#64748b' }}>{po.orderType}</span></td>
                                             <td>
-                                                <div className="po-vendor">{po.vendorId}</div>
-                                                {po.vendorName && <div className="po-vendor-name">{po.vendorName}</div>}
+                                                <div style={{ fontWeight: '700', color: '#0f172a', fontSize: '0.85rem' }}>{po.vendorName || po.vendorId}</div>
+                                                <div style={{ fontSize: '0.7rem', color: '#94a3b8' }}>{po.vendorId}</div>
                                             </td>
                                             <td>
                                                 <span className={`db-status-badge ${poStatusClass(po.status)}`}>{po.status || "—"}</span>
                                             </td>
-                                            <td>{fmtDate(po.date)}</td>
-                                            <td>{fmtDate(po.promisedOn)}</td>
-                                            <td>{po.lineCount}</td>
-                                            <td style={{ textAlign: "right" }}><strong>₱{fmt(po.totalAmount)}</strong></td>
+                                            <td><span style={{ fontSize: '0.8rem', color: '#475569' }}>{fmtDate(po.date)}</span></td>
+                                            <td style={{ textAlign: "right" }}><strong style={{ color: '#0f172a' }}>₱{fmt(po.totalAmount)}</strong></td>
                                         </tr>
                                         {isOpen && po.lines.length > 0 && (
                                             <tr className="po-lines-row">
-                                                <td colSpan={9} style={{ padding: 0 }}>
-                                                    <div className="po-lines-wrap">
-                                                        <table className="po-lines-table">
-                                                            <thead>
+                                                <td colSpan={7} style={{ padding: '0 1rem 1rem 3.5rem' }}>
+                                                    <div className="po-lines-wrap" style={{ borderRadius: '12px', border: '1px solid #e2e8f0', overflow: 'hidden', boxShadow: '0 4px 12px rgba(0,0,0,0.03)' }}>
+                                                        <table className="po-lines-table" style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.8rem' }}>
+                                                            <thead style={{ background: '#f8fafc' }}>
                                                                 <tr>
-                                                                    <th>Inventory ID</th>
-                                                                    <th>Description</th>
-                                                                    <th>Warehouse</th>
-                                                                    <th>UOM</th>
-                                                                    <th style={{ textAlign: "right" }}>Qty</th>
-                                                                    <th style={{ textAlign: "right" }}>Unit Cost</th>
-                                                                    <th style={{ textAlign: "right" }}>Ext. Cost</th>
+                                                                    <th style={{ textAlign: 'left', padding: '0.75rem' }}>Item</th>
+                                                                    <th style={{ textAlign: 'left', padding: '0.75rem' }}>Description</th>
+                                                                    <th style={{ textAlign: 'right', padding: '0.75rem' }}>Qty</th>
+                                                                    <th style={{ textAlign: 'right', padding: '0.75rem' }}>Ext. Cost</th>
                                                                 </tr>
                                                             </thead>
                                                             <tbody>
                                                                 {po.lines.map((line, i) => (
-                                                                    <tr key={i}>
-                                                                        <td>
+                                                                    <tr key={i} style={{ borderTop: '1px solid #f1f5f9' }}>
+                                                                        <td style={{ padding: '0.75rem' }}>
                                                                             <span 
-                                                                                className="si-id-chip si-id-chip-sm si-clickable-id"
+                                                                                className="db-inv-id si-clickable-id"
+                                                                                style={{ fontSize: '0.7rem', padding: '0.15rem 0.4rem', cursor: 'pointer' }}
                                                                                 onClick={(e) => { e.stopPropagation(); setSelectedId(line.inventoryId); }}
                                                                             >
-                                                                                {line.inventoryId || "—"}
+                                                                                {line.inventoryId}
                                                                             </span>
                                                                         </td>
-                                                                        <td>{line.description || "—"}</td>
-                                                                        <td>{line.warehouseId || "—"}</td>
-                                                                        <td>{line.uom || "—"}</td>
-                                                                        <td style={{ textAlign: "right" }}>{Number(line.qty).toLocaleString()}</td>
-                                                                        <td style={{ textAlign: "right" }}>₱{fmt(line.unitCost)}</td>
-                                                                        <td style={{ textAlign: "right" }}>₱{fmt(line.extCost)}</td>
+                                                                        <td style={{ padding: '0.75rem', color: '#64748b' }}>{line.description}</td>
+                                                                        <td style={{ padding: '0.75rem', textAlign: 'right', fontWeight: '700' }}>{Number(line.qty).toLocaleString()} {line.uom}</td>
+                                                                        <td style={{ padding: '0.75rem', textAlign: 'right', color: '#0f172a' }}>₱{fmt(line.extCost)}</td>
                                                                     </tr>
                                                                 ))}
                                                             </tbody>
@@ -318,21 +317,20 @@ export default function POPage() {
                     </table>
                 </div>
 
-                {/* Pagination */}
                 {!loading && (
-                    <div className="si-pagination">
-                        <span className="si-page-info">Page {page}</span>
-                        <div className="si-page-buttons">
-                            <button className="si-page-btn" onClick={() => setPage(p => Math.max(1, p - 1))} disabled={page === 1}>
-                                <IconChevronLeft /> Prev
+                    <div className="db-pagination">
+                        <span className="db-page-info">Page <strong>{page}</strong></span>
+                        <div className="db-page-btns">
+                            <button className="db-page-btn" onClick={() => setPage(p => Math.max(1, p - 1))} disabled={page === 1}>
+                                <IconChevronLeft />
                             </button>
-                            <button className="si-page-btn" onClick={() => setPage(p => p + 1)} disabled={!hasMore}>
-                                Next <IconChevronRight />
+                            <button className="db-page-btn" onClick={() => setPage(p => p + 1)} disabled={!hasMore}>
+                                <IconChevronRight />
                             </button>
                         </div>
                     </div>
                 )}
-            </div>
+            </main>
 
             {selectedId && (
                 <InventoryDetailModal inventoryId={selectedId} onClose={() => setSelectedId(null)} />

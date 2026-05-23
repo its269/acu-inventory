@@ -163,95 +163,107 @@ export default function SalesPeriodicPage() {
     const totalAmountSold = salesData.reduce((s, r) => s + r.totalSales, 0);
 
     return (
-        <main className="db-main">
-            <header className="db-page-title">
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-                    <div>
-                        <h1>Product Periodic Sales</h1>
-                        <p>3-Month Comparative Sales Analysis based on Target Month</p>
-                    </div>
-                    <button className="db-action-btn" onClick={exportCSV} disabled={salesData.length === 0}>
-                        <DownloadIcon /> Export CSV
-                    </button>
-                </div>
-            </header>
-
-            <section className="db-sales3m-filter-panel" style={{ borderRadius: '16px', border: '1px solid #e2e8f0' }}>
-                <div className="db-sales3m-filter-row">
-                    <div className="db-sales3m-filter-group">
-                        <label><CalendarIcon /> Target Month</label>
-                        <div className="db-select-wrapper" style={{ minWidth: '180px' }}>
-                            <select 
-                                className="db-select" 
-                                value={targetMonth} 
-                                onChange={(e) => setTargetMonth(parseInt(e.target.value))}
-                            >
-                                {monthNames.map((name, i) => (
-                                    <option key={name} value={i + 1}>{name}</option>
-                                ))}
-                            </select>
-                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><path d="m6 9 6 6 6-9"/></svg>
+        <div className="db-root" style={{ display: 'block', background: '#f8fafc', minHeight: '100vh' }}>
+            <main className="db-main" style={{ maxWidth: '1400px' }}>
+                <div className="db-page-title">
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                        <div>
+                            <h1>Product Periodic Sales</h1>
+                            <p>3-Month Comparative Sales Analysis based on Target Month. Fetched live from Acumatica.</p>
                         </div>
+                        <button className="db-action-btn" onClick={exportCSV} disabled={salesData.length === 0}>
+                            <DownloadIcon /> Export CSV
+                        </button>
                     </div>
-
-                    <div className="db-sales3m-filter-group">
-                        <label>Year</label>
-                        <div className="db-select-wrapper" style={{ minWidth: '120px' }}>
-                            <select 
-                                className="db-select" 
-                                value={targetYear} 
-                                onChange={(e) => setTargetYear(parseInt(e.target.value))}
-                            >
-                                {years.map(y => (
-                                    <option key={y} value={y}>{y}</option>
-                                ))}
-                            </select>
-                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><path d="m6 9 6 6 6-9"/></svg>
-                        </div>
-                    </div>
-
-                    <div className="db-sales3m-filter-group">
-                        <label><BranchIcon /> Branch / Warehouse</label>
-                        <div className="db-select-wrapper" style={{ minWidth: '220px' }}>
-                            <select className="db-select" value={selectedBranch} onChange={(e) => setSelectedBranch(e.target.value)}>
-                                <option value="">All Branches</option>
-                                {branchOptions.map((b) => (
-                                    <option key={b} value={b}>{b}</option>
-                                ))}
-                            </select>
-                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><path d="m6 9 6 6 6-9"/></svg>
-                        </div>
-                    </div>
-
-                    <button className="db-btn-run-analysis" onClick={fetchSales} disabled={loading}>
-                        {loading ? "Analyzing..." : "Run Analysis"}
-                    </button>
                 </div>
-            </section>
 
-            {error && <div className="db-error-card"><div className="db-error-body"><div className="db-error-title">Error</div><div className="db-error-msg">{error}</div></div></div>}
-
-            {loading ? (
-                <div className="db-loading">
-                    <div className="db-spinner db-spinner-lg"></div>
-                    <p>Fetching real-time data from Acumatica...</p>
+                <div className="db-stats">
+                    <div className="db-stat-card db-stat-blue">
+                        <span className="db-stat-label">3M Total Volume</span>
+                        <span className="db-stat-value">{salesData.length > 0 ? totalQtySold.toLocaleString() : "—"}</span>
+                        <span className="db-stat-sub">Units Sold</span>
+                    </div>
+                    <div className="db-stat-card">
+                        <span className="db-stat-label">3M Total Revenue</span>
+                        <span className="db-stat-value">{salesData.length > 0 ? `₱${totalAmountSold.toLocaleString(undefined, { minimumFractionDigits: 0 })}` : "—"}</span>
+                        <span className="db-stat-sub">Gross Sales</span>
+                    </div>
+                    <div className="db-stat-card">
+                        <span className="db-stat-label">Analyzing For</span>
+                        <span className="db-stat-value" style={{ fontSize: '1.25rem' }}>{monthNames[targetMonth - 1]} {targetYear}</span>
+                        <span className="db-stat-sub">Target Period</span>
+                    </div>
+                    <div className="db-stat-card">
+                        <span className="db-stat-label">Scope</span>
+                        <span className="db-stat-value" style={{ fontSize: '1.1rem' }}>{selectedBranch || "All Branches"}</span>
+                        <span className="db-stat-sub">Branch Selection</span>
+                    </div>
                 </div>
-            ) : (
-                <>
-                    {salesData.length > 0 && (
-                        <div className="db-stats">
-                            <div className="db-stat-card db-stat-blue">
-                                <span className="db-stat-label">Total Volume (3 Months)</span>
-                                <span className="db-stat-value">{totalQtySold.toLocaleString()}</span>
-                            </div>
-                            <div className="db-stat-card">
-                                <span className="db-stat-label">Total Revenue (3 Months)</span>
-                                <span className="db-stat-value">₱{totalAmountSold.toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
-                                <span className="db-stat-sub">Across {selectedBranch || 'all branches'}</span>
+
+                <section className="db-toolbar" style={{ height: 'auto', padding: '1.25rem' }}>
+                    <div className="db-toolbar-left" style={{ flexWrap: 'wrap', gap: '1.5rem' }}>
+                        <div className="db-sales3m-filter-group">
+                            <label><CalendarIcon /> Target Month</label>
+                            <div className="db-select-wrapper" style={{ minWidth: '180px' }}>
+                                <select 
+                                    className="db-select" 
+                                    value={targetMonth} 
+                                    onChange={(e) => setTargetMonth(parseInt(e.target.value))}
+                                >
+                                    {monthNames.map((name, i) => (
+                                        <option key={name} value={i + 1}>{name}</option>
+                                    ))}
+                                </select>
+                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" style={{ right: '0.9rem' }}><path d="m6 9 6 6 6-9"/></svg>
                             </div>
                         </div>
-                    )}
 
+                        <div className="db-sales3m-filter-group">
+                            <label>Year</label>
+                            <div className="db-select-wrapper" style={{ minWidth: '120px' }}>
+                                <select 
+                                    className="db-select" 
+                                    value={targetYear} 
+                                    onChange={(e) => setTargetYear(parseInt(e.target.value))}
+                                >
+                                    {years.map(y => (
+                                        <option key={y} value={y}>{y}</option>
+                                    ))}
+                                </select>
+                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" style={{ right: '0.9rem' }}><path d="m6 9 6 6 6-9"/></svg>
+                            </div>
+                        </div>
+
+                        <div className="db-sales3m-filter-group">
+                            <label><BranchIcon /> Branch / Warehouse</label>
+                            <div className="db-select-wrapper" style={{ minWidth: '220px' }}>
+                                <select className="db-select" value={selectedBranch} onChange={(e) => setSelectedBranch(e.target.value)}>
+                                    <option value="">All Branches</option>
+                                    {branchOptions.map((b) => (
+                                        <option key={b} value={b}>{b}</option>
+                                    ))}
+                                </select>
+                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" style={{ right: '0.9rem' }}><path d="m6 9 6 6 6-9"/></svg>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div className="db-toolbar-right" style={{ alignSelf: 'flex-end' }}>
+                        <button className="db-btn-run-analysis" onClick={() => fetchSales()} disabled={loading} style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px', minWidth: '160px' }}>
+                            {loading && <div className="db-spinner" style={{ width: '16px', height: '16px', borderWidth: '2.5px', borderTopColor: '#fff' }}></div>}
+                            <span>{loading ? "Analyzing..." : "Run Analysis"}</span>
+                        </button>
+                    </div>
+                </section>
+
+                {error && <div className="db-error-card"><div className="db-error-body"><div className="db-error-title">Error</div><div className="db-error-msg">{error}</div></div></div>}
+
+                {loading && salesData.length === 0 ? (
+                    <div className="db-loading">
+                        <div className="db-spinner db-spinner-lg"></div>
+                        <p>Fetching real-time data from Acumatica...</p>
+                    </div>
+                ) : (
                     <div className="db-table-wrap">
                         <table className="db-table">
                             <thead>
@@ -289,18 +301,18 @@ export default function SalesPeriodicPage() {
                                         <tr key={`${row.inventoryId}-${row.branchName}`}>
                                             <td><code className="db-inv-id">{row.inventoryId}</code></td>
                                             <td><span className="db-branch-tag">{row.branchName}</span></td>
-                                            <td className="db-desc">{row.description}</td>
+                                            <td className="db-desc" style={{ fontSize: '0.8rem' }}>{row.description}</td>
                                             {months.map(m => (
                                                 <Fragment key={m.key}>
                                                     <td className="db-num">{(row.monthlyData[m.key]?.qty || 0).toLocaleString()}</td>
-                                                    <td className="db-num">₱{(row.monthlyData[m.key]?.sales || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}</td>
+                                                    <td className="db-num">₱{(row.monthlyData[m.key]?.sales || 0).toLocaleString(undefined, { minimumFractionDigits: 0 })}</td>
                                                 </Fragment>
                                             ))}
                                             <td className="db-num" style={{ borderLeft: '2px solid #e2e8f0', fontWeight: '700' }}>
                                                 {row.totalQty.toLocaleString()}
                                             </td>
                                             <td className="db-num" style={{ fontWeight: '700' }}>
-                                                ₱{row.totalSales.toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                                                ₱{row.totalSales.toLocaleString(undefined, { minimumFractionDigits: 0 })}
                                             </td>
                                         </tr>
                                     ))
@@ -308,8 +320,8 @@ export default function SalesPeriodicPage() {
                             </tbody>
                         </table>
                     </div>
-                </>
-            )}
-        </main>
+                )}
+            </main>
+        </div>
     );
 }
