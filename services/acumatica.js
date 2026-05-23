@@ -327,30 +327,57 @@ export const AcumaticaService = {
     },
 
     async fetchSalesInvoicesByDateRange({ cookie, startDate, endDate }) {
-        const results = [];
+        const pageSize = 1000; 
+        const concurrency = 2; 
         const filter = `Date ge datetimeoffset'${startDate}T00:00:00Z' and Date le datetimeoffset'${endDate}T23:59:59Z'`;
         
+        const results = [];
+        let nextSkip = 0;
+        let isDone = false;
+
+        const worker = async (id) => {
+            while (!isDone) {
+                const skip = nextSkip;
+                nextSkip += pageSize;
+                
+                try {
+                    console.log(`>>> [Acumatica] Worker ${id} loading batch ${skip}...`);
+                    // Removed $select to avoid "key not present" errors
+                    const url = `${ACU_BASE}/SalesInvoice?$expand=Details&$top=${pageSize}&$skip=${skip}&$filter=${filter}`;
+                    
+                    const res = await this.fetchWithRetry(url, cookie);
+                    const data = await res.json();
+                    const items = data.value || (Array.isArray(data) ? data : []);
+                    
+                    if (items.length > 0) {
+                        results.push(...items);
+                        console.log(`>>> [Acumatica] Worker ${id} finished batch ${skip} (+${items.length} records)`);
+                    }
+                    
+                    if (items.length < pageSize) {
+                        isDone = true;
+                    }
+                } catch (err) {
+                    console.error(`>>> [Acumatica] Worker ${id} error at skip ${skip}:`, err.message);
+                    isDone = true; 
+                }
+            }
+        };
+
         try {
-            console.log(`>>> [Acumatica] Searching SalesInvoice: ${filter}`);
-            let url = `${ACU_BASE}/SalesInvoice?$expand=Details&$top=500&$filter=${filter}`;
-            let res = await this.fetchWithRetry(url, cookie);
-            let data = await res.json();
-            let items = data.value || (Array.isArray(data) ? data : []);
-            
-            if (items.length > 0) return items;
+            console.log(`>>> [Acumatica] Starting Sniper Fetch (Balanced Concurrency)...`);
+            const workers = Array.from({ length: concurrency }, (_, i) => worker(i + 1));
+            await Promise.all(workers);
 
-            url = `${ACU_BASE}/Invoice?$expand=Details&$top=500&$filter=${filter}`;
-            res = await this.fetchWithRetry(url, cookie);
-            data = await res.json();
-            items = data.value || (Array.isArray(data) ? data : []);
-            
-            if (items.length > 0) return items;
+            if (results.length === 0) {
+                const url = `${ACU_BASE}/Invoice?$expand=Details&$top=100&$orderby=Date desc`;
+                const res = await this.fetchWithRetry(url, cookie);
+                const data = await res.json();
+                return data.value || [];
+            }
 
-            url = `${ACU_BASE}/Invoice?$expand=Details&$top=100&$orderby=Date desc`;
-            res = await this.fetchWithRetry(url, cookie);
-            data = await res.json();
-            return data.value || [];
-
+            console.log(`>>> [Acumatica] Fetch complete. Total: ${results.length} records.`);
+            return results;
         } catch (err) {
             return [];
         }

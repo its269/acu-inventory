@@ -7,10 +7,10 @@ export async function GET(request) {
     try {
         const { searchParams } = new URL(request.url);
         const branch = searchParams.get("branch") || "";
-        const targetMonth = parseInt(searchParams.get("month")); // 1-12
+        const targetMonth = parseInt(searchParams.get("month"));
         const targetYear = parseInt(searchParams.get("year"));
         const page = parseInt(searchParams.get("page") || "1");
-        const pageSize = parseInt(searchParams.get("pageSize") || "50");
+        const pageSize = parseInt(searchParams.get("pageSize") || "15");
 
         if (!targetMonth || !targetYear) {
             return NextResponse.json({ message: "Month and Year are required" }, { status: 400 });
@@ -27,20 +27,40 @@ export async function GET(request) {
             return NextResponse.json({ message: "Session expired" }, { status: 401 });
         }
 
-        // 1. Calculate Target Date Range (Selected Month + Next 2 Months)
+        // 1. Calculate Date Range
         const startLimit = new Date(targetYear, targetMonth - 1, 1, 0, 0, 0);
         const endLimit = new Date(targetYear, targetMonth + 2, 0, 23, 59, 59);
-        
-        const formatACU = (d) => d.toISOString().split('T')[0];
-        const startDate = formatACU(startLimit);
-        const endDate = formatACU(endLimit);
+        const startDate = startLimit.toISOString().split('T')[0];
+        const endDate = endLimit.toISOString().split('T')[0];
 
-        // 2. Fetch Data (Unfiltered for stability)
+        // 2. Fetch Data
         const invoices = await AcumaticaService.fetchSalesInvoicesByDateRange({ 
             cookie, 
             startDate, 
             endDate 
         });
+
+        // 3. Fetch Overall Stocks for the Branch (from local synced data)
+        let overallStocks = 0;
+        if (branch && branch !== "All Branches") {
+            const { data: stockData } = await supabase
+                .from("warehouse_stock")
+                .select("on_hand")
+                .eq("warehouse_id", branch);
+            overallStocks = (stockData || []).reduce((sum, item) => sum + (item.on_hand || 0), 0);
+        } else {
+            const { data: stockData } = await supabase.from("warehouse_stock").select("on_hand");
+            overallStocks = (stockData || []).reduce((sum, item) => sum + (item.on_hand || 0), 0);
+        }
+
+        // 4. Define target months
+        const targetMonths = [];
+        for (let i = 0; i < 3; i++) {
+            const d = new Date(targetYear, targetMonth - 1 + i, 1);
+            const mKey = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+            const mLabel = d.toLocaleString('default', { month: 'short', year: 'numeric' });
+            targetMonths.push({ key: mKey, label: mLabel, date: d });
+        }
 
         const getF = (obj, keyName) => {
             if (!obj) return "";
@@ -57,16 +77,7 @@ export async function GET(request) {
             return "";
         };
 
-        // 3. Define consecutive months to show
-        const targetMonths = [];
-        for (let i = 0; i < 3; i++) {
-            const d = new Date(targetYear, targetMonth - 1 + i, 1);
-            const mKey = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
-            const mLabel = d.toLocaleString('default', { month: 'short', year: 'numeric' });
-            targetMonths.push({ key: mKey, label: mLabel, date: d });
-        }
-
-        // 4. Discover data
+        // 5. Aggregate with Metrics
         let filteredInvoices = invoices.filter(inv => {
             const d = new Date(getF(inv, "Date"));
             return d >= startLimit && d <= endLimit;
@@ -88,10 +99,12 @@ export async function GET(request) {
             }
         }
 
-        // 5. Aggregate
         const grouped = {};
         const { data: catalog } = await supabase.from("products").select("inventory_id,item_class,description");
         const productMap = new Map((catalog || []).map(p => [p.inventory_id.toUpperCase().trim(), p]));
+
+        let totalRevenue = 0;
+        let totalQtySold = 0;
 
         for (const inv of filteredInvoices) {
             const docDate = new Date(getF(inv, "Date"));
@@ -122,12 +135,15 @@ export async function GET(request) {
 
                 const qty = Number(getAny(line, "Qty", "Quantity") || 0);
                 const sales = Number(getAny(line, "Amount", "ExtCost", "ExtPrice") || 0);
+
                 if (grouped[groupKey].monthlyData[mKey]) {
                     grouped[groupKey].monthlyData[mKey].qty += qty;
                     grouped[groupKey].monthlyData[mKey].sales += sales;
                 }
                 grouped[groupKey].totalQty += qty;
                 grouped[groupKey].totalSales += sales;
+                totalRevenue += sales;
+                totalQtySold += qty;
             }
         }
 
@@ -136,6 +152,12 @@ export async function GET(request) {
         return NextResponse.json({
             data: finalResults.slice((page - 1) * pageSize, page * pageSize),
             months: displayMonths.map(m => ({ key: m.key, label: m.label })),
+            metrics: {
+                overallStocks,
+                totalRevenue,
+                uniqueProducts: finalResults.length,
+                totalQtySold
+            },
             pagination: {
                 page,
                 pageSize,
@@ -146,7 +168,6 @@ export async function GET(request) {
 
     } catch (err) {
         console.error("[Periodic Sales API Error]", err);
-        if (err.message === "Unauthorized") return NextResponse.json({ message: "Unauthorized" }, { status: 401 });
         return NextResponse.json({ message: "Failed to fetch periodic sales", error: err.message }, { status: 500 });
     }
 }

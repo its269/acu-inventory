@@ -9,10 +9,20 @@ const CalendarIcon = () => (
     <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"></rect><line x1="16" y1="2" x2="16" y2="6"></line><line x1="8" y1="2" x2="8" y2="6"></line><line x1="3" y1="10" x2="21" y2="10"></line></svg>
 );
 const DownloadIcon = () => (
-    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" x1="12" x2="12" y2="3"></line></svg>
 );
 const BranchIcon = () => (
     <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"></path><circle cx="12" cy="10" r="3"></circle></svg>
+);
+const IconChevronLeft = () => (
+    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+        <polyline points="15 18 9 12 15 6" />
+    </svg>
+);
+const IconChevronRight = () => (
+    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+        <polyline points="9 18 15 12 9 6" />
+    </svg>
 );
 
 const monthNames = [
@@ -31,6 +41,8 @@ export default function SalesPeriodicPage() {
     const [months, setMonths] = useState([]);
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState("");
+    const [pagination, setPagination] = useState({ page: 1, pageSize: 15, totalItems: 0, totalPages: 0 });
+    const [metrics, setMetrics] = useState({ overallStocks: 0, totalRevenue: 0, uniqueProducts: 0, totalQtySold: 0 });
     
     const [targetMonth, setTargetMonth] = useState(new Date().getMonth() + 1);
     const [targetYear, setTargetYear] = useState(currentYear);
@@ -52,16 +64,17 @@ export default function SalesPeriodicPage() {
     }, []);
 
     /* ── Fetch sales analysis ───────────────────────────── */
-    const fetchSales = useCallback(async () => {
+    const fetchSales = useCallback(async (page = 1) => {
+        console.log(">>> [Sales UI] Calling /api/sales-periodic...");
         setLoading(true);
         setError("");
-        setSalesData([]);
-        setMonths([]);
         try {
             const params = new URLSearchParams({ 
                 branch: selectedBranch, 
                 month: targetMonth.toString(),
-                year: targetYear.toString()
+                year: targetYear.toString(),
+                page: page.toString(),
+                pageSize: "15"
             });
             const res = await fetch(`/api/sales-periodic?${params.toString()}`);
             if (res.status === 401) { router.push("/signin"); return; }
@@ -69,6 +82,8 @@ export default function SalesPeriodicPage() {
             const result = await res.json();
             setSalesData(result.data || []);
             setMonths(result.months || []);
+            setPagination(result.pagination || { page: 1, pageSize: 15, totalItems: 0, totalPages: 0 });
+            setMetrics(result.metrics || { overallStocks: 0, totalRevenue: 0, uniqueProducts: 0, totalQtySold: 0 });
         } catch {
             setError("Unable to connect to the server.");
         } finally {
@@ -107,16 +122,13 @@ export default function SalesPeriodicPage() {
         URL.revokeObjectURL(url);
     }, [salesData, selectedBranch, targetMonth, targetYear, months]);
 
-    const totalQtySold = salesData.reduce((s, r) => s + r.totalQty, 0);
-    const totalAmountSold = salesData.reduce((s, r) => s + r.totalSales, 0);
-
     return (
         <main className="db-main">
             <header className="db-page-title">
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
                     <div>
                         <h1>Product Periodic Sales</h1>
-                        <p>3-Month Comparative Sales Analysis based on Target Month</p>
+                        <p>3-Month Comparative Sales Analysis</p>
                     </div>
                     <button className="db-action-btn" onClick={exportCSV} disabled={salesData.length === 0}>
                         <DownloadIcon /> Export CSV
@@ -171,7 +183,7 @@ export default function SalesPeriodicPage() {
                         </div>
                     </div>
 
-                    <button className="db-btn-run-analysis" onClick={fetchSales} disabled={loading}>
+                    <button className="db-btn-run-analysis" onClick={() => fetchSales(1)} disabled={loading}>
                         {loading ? "Analyzing..." : "Run Analysis"}
                     </button>
                 </div>
@@ -182,20 +194,27 @@ export default function SalesPeriodicPage() {
             {loading ? (
                 <div className="db-loading">
                     <div className="db-spinner db-spinner-lg"></div>
-                    <p>Fetching real-time data from Acumatica...</p>
+                    <p>Fetching real-time data from Acumatica (This may take 1-2 minutes)...</p>
                 </div>
             ) : (
                 <>
                     {salesData.length > 0 && (
                         <div className="db-stats">
                             <div className="db-stat-card db-stat-blue">
-                                <span className="db-stat-label">Total Volume (3 Months)</span>
-                                <span className="db-stat-value">{totalQtySold.toLocaleString()}</span>
+                                <span className="db-stat-label">Overall Stocks ({selectedBranch || 'All'})</span>
+                                <span className="db-stat-value">{metrics.overallStocks.toLocaleString()}</span>
                             </div>
                             <div className="db-stat-card">
-                                <span className="db-stat-label">Total Revenue (3 Months)</span>
-                                <span className="db-stat-value">₱{totalAmountSold.toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
-                                <span className="db-stat-sub">Across {selectedBranch || 'all branches'}</span>
+                                <span className="db-stat-label">Overall Sales (3 Months)</span>
+                                <span className="db-stat-value">₱{metrics.totalRevenue.toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
+                            </div>
+                            <div className="db-stat-card">
+                                <span className="db-stat-label">Unique Products Sold</span>
+                                <span className="db-stat-value">{metrics.uniqueProducts.toLocaleString()}</span>
+                            </div>
+                            <div className="db-stat-card">
+                                <span className="db-stat-label">Total Units Sold</span>
+                                <span className="db-stat-value">{metrics.totalQtySold.toLocaleString()}</span>
                             </div>
                         </div>
                     )}
@@ -256,6 +275,28 @@ export default function SalesPeriodicPage() {
                             </tbody>
                         </table>
                     </div>
+
+                    {salesData.length > 0 && pagination.totalPages > 1 && (
+                        <div className="si-pagination" style={{ marginTop: '20px' }}>
+                            <span className="si-page-info">Page {pagination.page} of {pagination.totalPages}</span>
+                            <div className="si-page-buttons">
+                                <button 
+                                    className="si-page-btn" 
+                                    onClick={() => fetchSales(pagination.page - 1)} 
+                                    disabled={pagination.page === 1}
+                                >
+                                    <IconChevronLeft /> Prev
+                                </button>
+                                <button 
+                                    className="si-page-btn" 
+                                    onClick={() => fetchSales(pagination.page + 1)} 
+                                    disabled={pagination.page === pagination.totalPages}
+                                >
+                                    Next <IconChevronRight />
+                                </button>
+                            </div>
+                        </div>
+                    )}
                 </>
             )}
         </main>
