@@ -10,6 +10,10 @@ const branchCache = {
     timestamp: 0
 };
 
+// Track active sales sync to allow interrupting old requests
+let activeSalesSyncId = 0;
+let runningWorkersCount = 0;
+
 /**
  * Service for interacting with Acumatica ERP.
  * This acts as the core of our BFF (Backend-for-Frontend) layer.
@@ -331,43 +335,60 @@ export const AcumaticaService = {
         const concurrency = 2; 
         const filter = `Date ge datetimeoffset'${startDate}T00:00:00Z' and Date le datetimeoffset'${endDate}T23:59:59Z'`;
         
+        // Reset counter if no workers are running (Safe Reset logic)
+        if (runningWorkersCount <= 0) {
+            activeSalesSyncId = 0;
+        }
+        const syncId = ++activeSalesSyncId;
+        
         const results = [];
         let nextSkip = 0;
         let isDone = false;
 
         const worker = async (id) => {
-            while (!isDone) {
-                const skip = nextSkip;
-                nextSkip += pageSize;
-                
-                try {
-                    console.log(`>>> [Acumatica] Worker ${id} loading batch ${skip}...`);
-                    // Removed $select to avoid "key not present" errors
-                    const url = `${ACU_BASE}/SalesInvoice?$expand=Details&$top=${pageSize}&$skip=${skip}&$filter=${filter}`;
-                    
-                    const res = await this.fetchWithRetry(url, cookie);
-                    const data = await res.json();
-                    const items = data.value || (Array.isArray(data) ? data : []);
-                    
-                    if (items.length > 0) {
-                        results.push(...items);
-                        console.log(`>>> [Acumatica] Worker ${id} finished batch ${skip} (+${items.length} records)`);
+            runningWorkersCount++;
+            try {
+                while (!isDone) {
+                    if (syncId !== activeSalesSyncId) {
+                        console.log(`>>> [Acumatica] Worker ${id} interrupted. Terminating...`);
+                        return;
                     }
+
+                    const skip = nextSkip;
+                    nextSkip += pageSize;
                     
-                    if (items.length < pageSize) {
-                        isDone = true;
+                    try {
+                        console.log(`>>> [Acumatica] [Request #${syncId}] Worker ${id} loading batch ${skip}...`);
+                        const url = `${ACU_BASE}/SalesInvoice?$expand=Details&$top=${pageSize}&$skip=${skip}&$filter=${filter}`;
+                        
+                        const res = await this.fetchWithRetry(url, cookie);
+                        const data = await res.json();
+                        const items = data.value || (Array.isArray(data) ? data : []);
+                        
+                        if (items.length > 0) {
+                            results.push(...items);
+                            console.log(`>>> [Acumatica] [Request #${syncId}] Worker ${id} finished batch ${skip} (+${items.length} records)`);
+                        }
+                        
+                        if (items.length < pageSize) {
+                            isDone = true;
+                        }
+                    } catch (err) {
+                        console.error(`>>> [Acumatica] [Request #${syncId}] Worker ${id} error at skip ${skip}:`, err.message);
+                        isDone = true; 
                     }
-                } catch (err) {
-                    console.error(`>>> [Acumatica] Worker ${id} error at skip ${skip}:`, err.message);
-                    isDone = true; 
                 }
+            } finally {
+                runningWorkersCount--;
             }
         };
 
         try {
-            console.log(`>>> [Acumatica] Starting Sniper Fetch (Balanced Concurrency)...`);
+            console.log(`>>> [Acumatica] Starting Sniper Fetch #${syncId} (Balanced Concurrency)...`);
             const workers = Array.from({ length: concurrency }, (_, i) => worker(i + 1));
             await Promise.all(workers);
+
+            if (syncId !== activeSalesSyncId) return [];
 
             if (results.length === 0) {
                 const url = `${ACU_BASE}/Invoice?$expand=Details&$top=100&$orderby=Date desc`;
@@ -376,7 +397,7 @@ export const AcumaticaService = {
                 return data.value || [];
             }
 
-            console.log(`>>> [Acumatica] Fetch complete. Total: ${results.length} records.`);
+            console.log(`>>> [Acumatica] Fetch complete #${syncId}. Total: ${results.length} records.`);
             return results;
         } catch (err) {
             return [];
@@ -449,5 +470,7 @@ const getF = (obj, keyName) => {
     const k = Object.keys(obj).find(i => i.toLowerCase() === keyName.toLowerCase());
     if (!k) return "";
     const val = obj[k];
-    return (val?.value !== undefined ? val.value : val) ?? "";
+    if (val === null || val === undefined) return "";
+    if (typeof val === "object") return val.value ?? "";
+    return val;
 };
