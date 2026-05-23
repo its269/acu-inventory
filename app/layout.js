@@ -1,7 +1,7 @@
 import "./globals.css";
 
 export const metadata = {
-  title: "Sign In",
+  title: "KGS PURCHASING",
   description: "Sign in to your account",
 };
 
