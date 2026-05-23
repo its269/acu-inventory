@@ -2,6 +2,7 @@
 
 import { useState, useCallback, useEffect, memo, Fragment } from "react";
 import { useRouter } from "next/navigation";
+import { DataCache } from "@/lib/data-cache";
 import "@/styles/dashboard.css";
 
 /* ── SVG Icons ───────────────────────────────────── */
@@ -26,25 +27,53 @@ const years = Array.from({ length: 6 }, (_, i) => currentYear - i);
 export default function SalesPeriodicPage() {
     const router = useRouter();
     const [branchOptions, setBranchOptions] = useState([]);
-    const [selectedBranch, setSelectedBranch] = useState("");
+    const [selectedBranch, setSelectedBranch] = useState(() => {
+        if (typeof window !== "undefined") return localStorage.getItem("sales_filter_branch") || "";
+        return "";
+    });
     const [salesData, setSalesData] = useState([]);
     const [months, setMonths] = useState([]);
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState("");
     
-    const [targetMonth, setTargetMonth] = useState(new Date().getMonth() + 1);
-    const [targetYear, setTargetYear] = useState(currentYear);
+    const [targetMonth, setTargetMonth] = useState(() => {
+        if (typeof window !== "undefined") {
+            const stored = localStorage.getItem("sales_filter_month");
+            return stored ? parseInt(stored) : new Date().getMonth() + 1;
+        }
+        return new Date().getMonth() + 1;
+    });
+    const [targetYear, setTargetYear] = useState(() => {
+        if (typeof window !== "undefined") {
+            const stored = localStorage.getItem("sales_filter_year");
+            return stored ? parseInt(stored) : currentYear;
+        }
+        return currentYear;
+    });
+
+    // Save filters to localStorage when they change
+    useEffect(() => {
+        localStorage.setItem("sales_filter_branch", selectedBranch);
+        localStorage.setItem("sales_filter_month", targetMonth.toString());
+        localStorage.setItem("sales_filter_year", targetYear.toString());
+    }, [selectedBranch, targetMonth, targetYear]);
 
     /* ── Fetch branches ─────────────────────────────────── */
     useEffect(() => {
         const fetchBranches = async () => {
+            const cacheKey = "branches";
+            const cached = DataCache.get(cacheKey);
+            if (cached) setBranchOptions(cached);
+
             try {
                 const res = await fetch("/api/branches");
                 if (res.ok) {
                     const data = await res.json();
                     const list = Array.isArray(data) ? data : (data?.value || []);
                     const names = list.map((b) => b.SiteID || b.BranchName?.value || b.BranchID?.value).filter(Boolean);
-                    setBranchOptions([...new Set(names)].sort());
+                    const unique = [...new Set(names)].sort();
+                    setBranchOptions(unique);
+                    DataCache.set(cacheKey, unique);
                 }
             } catch { }
         };
@@ -52,29 +81,52 @@ export default function SalesPeriodicPage() {
     }, []);
 
     /* ── Fetch sales analysis ───────────────────────────── */
-    const fetchSales = useCallback(async () => {
-        setLoading(true);
-        setError("");
-        setSalesData([]);
-        setMonths([]);
+    const fetchSales = useCallback(async (isBackground = false) => {
+        if (!isBackground) {
+            setLoading(true);
+            setError("");
+            setSalesData([]);
+            setMonths([]);
+        }
         try {
             const params = new URLSearchParams({ 
                 branch: selectedBranch, 
                 month: targetMonth.toString(),
                 year: targetYear.toString()
             });
+            const cacheKey = `sales_periodic_${params.toString()}`;
+
             const res = await fetch(`/api/sales-periodic?${params.toString()}`);
             if (res.status === 401) { router.push("/signin"); return; }
-            if (!res.ok) { setError("Failed to load sales history."); return; }
+            if (!res.ok) { 
+                if (!isBackground) setError("Failed to load sales history."); 
+                return; 
+            }
             const result = await res.json();
             setSalesData(result.data || []);
             setMonths(result.months || []);
+            DataCache.set(cacheKey, result);
         } catch {
-            setError("Unable to connect to the server.");
+            if (!isBackground) setError("Unable to connect to the server.");
         } finally {
             setLoading(false);
         }
     }, [selectedBranch, targetMonth, targetYear, router]);
+
+    /* ── Restore from cache ─────────────────────────────── */
+    useEffect(() => {
+        const params = new URLSearchParams({ 
+            branch: selectedBranch, 
+            month: targetMonth.toString(),
+            year: targetYear.toString()
+        });
+        const cacheKey = `sales_periodic_${params.toString()}`;
+        const cached = DataCache.get(cacheKey);
+        if (cached) {
+            setSalesData(cached.data || []);
+            setMonths(cached.months || []);
+        }
+    }, []);
 
     /* ── Export CSV ─────────────────────────────────────── */
     const exportCSV = useCallback(() => {

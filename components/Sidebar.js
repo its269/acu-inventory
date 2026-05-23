@@ -3,6 +3,7 @@
 import { useState, useEffect } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { DataCache } from "@/lib/data-cache";
 import "@/styles/sidebar.css";
 import SyncModal from "./SyncModal";
 
@@ -107,16 +108,27 @@ export default function Sidebar() {
       <SyncModal
         isOpen={showSyncModal}
         onClose={() => setShowSyncModal(false)}
-        onSyncComplete={() => window.location.reload()}
+        onSyncComplete={() => {
+          DataCache.clear();
+          window.location.reload();
+        }}
       />
 
       <div className="sidebar-footer">
         <button
           className="sidebar-logout"
           onClick={() => {
+            // Clear user info
             localStorage.removeItem("userName");
             localStorage.removeItem("userFirstName");
             localStorage.removeItem("userLastName");
+            
+            // Clear filter persistence
+            Object.keys(localStorage)
+              .filter(k => k.includes("_filter_"))
+              .forEach(k => localStorage.removeItem(k));
+
+            DataCache.clear();
             // Navigate directly — the logout route clears the cookie and
             // redirects to /signin in a single server response.
             window.location.href = "/api/auth/logout";

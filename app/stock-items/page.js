@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
+import { DataCache } from "@/lib/data-cache";
 import InventoryDetailModal from "@/components/InventoryDetailModal";
 import "@/styles/dashboard.css";
 import "@/styles/stock-items.css";
@@ -43,31 +44,42 @@ export default function StockItemsPage() {
         Promise.resolve().then(() => setPage(1));
     }, [debouncedSearch]);
 
-    const fetchItems = useCallback(async () => {
-        setLoading(true);
+    const fetchItems = useCallback(async (isBackground = false) => {
+        if (!isBackground) setLoading(true);
         setError(null);
         try {
             const params = new URLSearchParams({ page: String(page), pageSize: String(PAGE_SIZE) });
             if (debouncedSearch) params.set("search", debouncedSearch);
+            const cacheKey = `stock_items_${params.toString()}`;
+
             const res = await fetch(`/api/stock-items?${params}`);
             if (!res.ok) throw new Error(`HTTP ${res.status}`);
             const data = await res.json();
             setItems(data.items ?? []);
             setTotalCount(data.totalCount ?? 0);
+            DataCache.set(cacheKey, data);
         } catch (err) {
-            setError("Failed to load stock items. Please try again.");
+            if (!isBackground) setError("Failed to load stock items. Please try again.");
         } finally {
             setLoading(false);
         }
     }, [page, debouncedSearch]);
 
     useEffect(() => {
-        const controller = new AbortController();
-        Promise.resolve().then(() => {
-            if (!controller.signal.aborted) fetchItems();
-        });
-        return () => controller.abort();
-    }, [fetchItems]);
+        const params = new URLSearchParams({ page: String(page), pageSize: String(PAGE_SIZE) });
+        if (debouncedSearch) params.set("search", debouncedSearch);
+        const cacheKey = `stock_items_${params.toString()}`;
+
+        const cached = DataCache.get(cacheKey);
+        if (cached) {
+            setItems(cached.items ?? []);
+            setTotalCount(cached.totalCount ?? 0);
+            setLoading(false);
+            fetchItems(true);
+        } else {
+            fetchItems(false);
+        }
+    }, [fetchItems, page, debouncedSearch]);
 
     const totalPages = Math.max(1, Math.ceil(totalCount / PAGE_SIZE));
 

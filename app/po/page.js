@@ -1,6 +1,7 @@
 "use client";
 
 import { Fragment, useState, useEffect, useCallback } from "react";
+import { DataCache } from "@/lib/data-cache";
 import InventoryDetailModal from "@/components/InventoryDetailModal";
 import "@/styles/dashboard.css";
 import "@/styles/stock-items.css";
@@ -48,16 +49,39 @@ function fmtDate(d) {
 
 export default function POPage() {
     const [orders, setOrders] = useState([]);
-    const [page, setPage] = useState(1);
+    const [page, setPage] = useState(() => {
+        if (typeof window !== "undefined") {
+            const stored = localStorage.getItem("po_filter_page");
+            return stored ? parseInt(stored) : 1;
+        }
+        return 1;
+    });
     const [hasMore, setHasMore] = useState(false);
-    const [search, setSearch] = useState("");
+    const [search, setSearch] = useState(() => {
+        if (typeof window !== "undefined") return localStorage.getItem("po_filter_search") || "";
+        return "";
+    });
     const [debSearch, setDebSearch] = useState("");
-    const [startDate, setStartDate] = useState(""); // Empty by default to avoid 500 error on initial load
-    const [status, setStatus] = useState("Open");
+    const [startDate, setStartDate] = useState(() => {
+        if (typeof window !== "undefined") return localStorage.getItem("po_filter_startDate") || "";
+        return "";
+    });
+    const [status, setStatus] = useState(() => {
+        if (typeof window !== "undefined") return localStorage.getItem("po_filter_status") || "Open";
+        return "Open";
+    });
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState(null);
     const [expanded, setExpanded] = useState({}); // orderNbr -> bool
     const [selectedId, setSelectedId] = useState(null);
+
+    // Save filters to localStorage
+    useEffect(() => {
+        localStorage.setItem("po_filter_page", page.toString());
+        localStorage.setItem("po_filter_search", search);
+        localStorage.setItem("po_filter_startDate", startDate);
+        localStorage.setItem("po_filter_status", status);
+    }, [page, search, startDate, status]);
 
     // Current month/year for display hint
     const currentMonthYear = new Date().toLocaleDateString("en-PH", { month: "long", year: "numeric" });
@@ -71,8 +95,8 @@ export default function POPage() {
         Promise.resolve().then(() => setPage(1));
     }, [debSearch, startDate, status]);
 
-    const fetchOrders = useCallback(async () => {
-        setLoading(true);
+    const fetchOrders = useCallback(async (isBackground = false) => {
+        if (!isBackground) setLoading(true);
         setError(null);
         try {
             const params = new URLSearchParams({
@@ -82,28 +106,45 @@ export default function POPage() {
                 status: status
             });
             if (debSearch) params.set("search", debSearch);
+            const cacheKey = `po_orders_${params.toString()}`;
+
             const res = await fetch(`/api/po?${params}`);
             if (!res.ok) {
                 const body = await res.json().catch(() => ({}));
-                throw new Error(body.message || `HTTP ${res.status}`);
+                if (!isBackground) throw new Error(body.message || `HTTP ${res.status}`);
+                return;
             }
             const data = await res.json();
             setOrders(data.orders ?? []);
             setHasMore(data.hasMore ?? false);
+            DataCache.set(cacheKey, data);
         } catch (err) {
-            setError(err.message || "Failed to load purchase orders.");
+            if (!isBackground) setError(err.message || "Failed to load purchase orders.");
         } finally {
             setLoading(false);
         }
     }, [page, debSearch, startDate, status]);
 
     useEffect(() => {
-        const controller = new AbortController();
-        Promise.resolve().then(() => {
-            if (!controller.signal.aborted) fetchOrders();
+        const params = new URLSearchParams({
+            page: String(page),
+            pageSize: String(PAGE_SIZE),
+            startDate: startDate,
+            status: status
         });
-        return () => controller.abort();
-    }, [fetchOrders]);
+        if (debSearch) params.set("search", debSearch);
+        const cacheKey = `po_orders_${params.toString()}`;
+
+        const cached = DataCache.get(cacheKey);
+        if (cached) {
+            setOrders(cached.orders ?? []);
+            setHasMore(cached.hasMore ?? false);
+            setLoading(false);
+            fetchOrders(true);
+        } else {
+            fetchOrders(false);
+        }
+    }, [fetchOrders, page, debSearch, startDate, status]);
 
     const toggleExpand = (key) => setExpanded(prev => ({ ...prev, [key]: !prev[key] }));
 

@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
+import { DataCache } from "@/lib/data-cache";
 import "@/styles/inventory-detail.css";
 
 const IconClose = () => (
@@ -36,22 +37,30 @@ export default function InventoryDetailModal({ inventoryId, onClose }) {
     useEffect(() => {
         if (!inventoryId) return;
 
+        const cacheKey = `stock_detail_${inventoryId}`;
+        const cached = DataCache.get(cacheKey);
+        if (cached) {
+            setDetail(cached);
+            setLoading(false);
+        }
+
         const controller = new AbortController();
-        Promise.resolve().then(() => {
-            if (controller.signal.aborted) return;
-            setLoading(true);
-            setDetail(null);
+        const fetchDetail = async () => {
+            if (!cached) setLoading(true);
             setError(null);
-            fetch(`/api/stock-items/${encodeURIComponent(inventoryId)}`, { signal: controller.signal })
-                .then(r => r.json())
-                .then(d => { setDetail(d); setLoading(false); })
-                .catch((err) => {
-                    if (err.name !== 'AbortError') {
-                        setError("Failed to load details.");
-                        setLoading(false);
-                    }
-                });
-        });
+            try {
+                const r = await fetch(`/api/stock-items/${encodeURIComponent(inventoryId)}`, { signal: controller.signal });
+                const d = await r.json();
+                setDetail(d);
+                DataCache.set(cacheKey, d);
+            } catch (err) {
+                if (err.name !== 'AbortError') setError("Failed to load details.");
+            } finally {
+                setLoading(false);
+            }
+        };
+
+        fetchDetail();
         return () => controller.abort();
     }, [inventoryId]);
 
