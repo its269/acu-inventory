@@ -26,37 +26,36 @@ const years = Array.from({ length: 6 }, (_, i) => currentYear - i);
 
 export default function SalesPeriodicPage() {
     const router = useRouter();
+    const [mounted, setMounted] = useState(false);
     const [branchOptions, setBranchOptions] = useState([]);
-    const [selectedBranch, setSelectedBranch] = useState(() => {
-        if (typeof window !== "undefined") return localStorage.getItem("sales_filter_branch") || "";
-        return "";
-    });
+    const [selectedBranch, setSelectedBranch] = useState("");
     const [salesData, setSalesData] = useState([]);
     const [months, setMonths] = useState([]);
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState("");
-    
-    const [targetMonth, setTargetMonth] = useState(() => {
-        if (typeof window !== "undefined") {
-            const stored = localStorage.getItem("sales_filter_month");
-            return stored ? parseInt(stored) : new Date().getMonth() + 1;
-        }
-        return new Date().getMonth() + 1;
-    });
-    const [targetYear, setTargetYear] = useState(() => {
-        if (typeof window !== "undefined") {
-            const stored = localStorage.getItem("sales_filter_year");
-            return stored ? parseInt(stored) : currentYear;
-        }
-        return currentYear;
-    });
+
+    const [targetMonth, setTargetMonth] = useState(new Date().getMonth() + 1);
+    const [targetYear, setTargetYear] = useState(currentYear);
+
+    // Initial hydration and restore from localStorage
+    useEffect(() => {
+        setMounted(true);
+        const branch = localStorage.getItem("sales_filter_branch") || "";
+        const month = localStorage.getItem("sales_filter_month");
+        const year = localStorage.getItem("sales_filter_year");
+
+        if (branch) setSelectedBranch(branch);
+        if (month) setTargetMonth(parseInt(month));
+        if (year) setTargetYear(parseInt(year));
+    }, []);
 
     // Save filters to localStorage when they change
     useEffect(() => {
+        if (!mounted) return;
         localStorage.setItem("sales_filter_branch", selectedBranch);
         localStorage.setItem("sales_filter_month", targetMonth.toString());
         localStorage.setItem("sales_filter_year", targetYear.toString());
-    }, [selectedBranch, targetMonth, targetYear]);
+    }, [selectedBranch, targetMonth, targetYear, mounted]);
 
     /* ── Fetch branches ─────────────────────────────────── */
     useEffect(() => {
@@ -89,8 +88,8 @@ export default function SalesPeriodicPage() {
             setMonths([]);
         }
         try {
-            const params = new URLSearchParams({ 
-                branch: selectedBranch, 
+            const params = new URLSearchParams({
+                branch: selectedBranch,
                 month: targetMonth.toString(),
                 year: targetYear.toString()
             });
@@ -98,9 +97,9 @@ export default function SalesPeriodicPage() {
 
             const res = await fetch(`/api/sales-periodic?${params.toString()}`);
             if (res.status === 401) { router.push("/signin"); return; }
-            if (!res.ok) { 
-                if (!isBackground) setError("Failed to load sales history."); 
-                return; 
+            if (!res.ok) {
+                if (!isBackground) setError("Failed to load sales history.");
+                return;
             }
             const result = await res.json();
             setSalesData(result.data || []);
@@ -115,8 +114,8 @@ export default function SalesPeriodicPage() {
 
     /* ── Restore from cache ─────────────────────────────── */
     useEffect(() => {
-        const params = new URLSearchParams({ 
-            branch: selectedBranch, 
+        const params = new URLSearchParams({
+            branch: selectedBranch,
             month: targetMonth.toString(),
             year: targetYear.toString()
         });
@@ -164,7 +163,7 @@ export default function SalesPeriodicPage() {
 
     return (
         <div className="db-root" style={{ display: 'block', background: '#f8fafc', minHeight: '100vh' }}>
-            <main className="db-main" style={{ maxWidth: '1400px' }}>
+            <main className="db-main" style={{ maxWidth: '100%' }}>
                 <div className="db-page-title">
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
                         <div>
@@ -205,32 +204,32 @@ export default function SalesPeriodicPage() {
                         <div className="db-sales3m-filter-group">
                             <label><CalendarIcon /> Target Month</label>
                             <div className="db-select-wrapper" style={{ minWidth: '180px' }}>
-                                <select 
-                                    className="db-select" 
-                                    value={targetMonth} 
+                                <select
+                                    className="db-select"
+                                    value={targetMonth}
                                     onChange={(e) => setTargetMonth(parseInt(e.target.value))}
                                 >
                                     {monthNames.map((name, i) => (
                                         <option key={name} value={i + 1}>{name}</option>
                                     ))}
                                 </select>
-                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" style={{ right: '0.9rem' }}><path d="m6 9 6 6 6-9"/></svg>
+                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" style={{ right: '0.9rem' }}><path d="m6 9 6 6 6-9" /></svg>
                             </div>
                         </div>
 
                         <div className="db-sales3m-filter-group">
                             <label>Year</label>
                             <div className="db-select-wrapper" style={{ minWidth: '120px' }}>
-                                <select 
-                                    className="db-select" 
-                                    value={targetYear} 
+                                <select
+                                    className="db-select"
+                                    value={targetYear}
                                     onChange={(e) => setTargetYear(parseInt(e.target.value))}
                                 >
                                     {years.map(y => (
                                         <option key={y} value={y}>{y}</option>
                                     ))}
                                 </select>
-                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" style={{ right: '0.9rem' }}><path d="m6 9 6 6 6-9"/></svg>
+                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" style={{ right: '0.9rem' }}><path d="m6 9 6 6 6-9" /></svg>
                             </div>
                         </div>
 
@@ -243,13 +242,19 @@ export default function SalesPeriodicPage() {
                                         <option key={b} value={b}>{b}</option>
                                     ))}
                                 </select>
-                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" style={{ right: '0.9rem' }}><path d="m6 9 6 6 6-9"/></svg>
+                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" style={{ right: '0.9rem' }}><path d="m6 9 6 6 6-9" /></svg>
                             </div>
                         </div>
                     </div>
 
                     <div className="db-toolbar-right" style={{ alignSelf: 'flex-end' }}>
-                        <button className="db-btn-run-analysis" onClick={() => fetchSales()} disabled={loading} style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px', minWidth: '160px' }}>
+                        <button
+                            type="button"
+                            className="db-btn-run-analysis"
+                            onClick={() => fetchSales()}
+                            disabled={loading}
+                            style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px', minWidth: '160px' }}
+                        >
                             {loading && <div className="db-spinner" style={{ width: '16px', height: '16px', borderWidth: '2.5px', borderTopColor: '#fff' }}></div>}
                             <span>{loading ? "Analyzing..." : "Run Analysis"}</span>
                         </button>
@@ -276,7 +281,7 @@ export default function SalesPeriodicPage() {
                                             {m.label.toUpperCase()}
                                         </th>
                                     ))}
-                                    <th rowSpan={2} className="db-num" style={{ borderLeft: '2px solid #e2e8f0', verticalAlign: 'middle', fontWeight: '800' }}>TOTAL QTY</th>
+                                    <th rowSpan={2} className="db-num" style={{ verticalAlign: 'middle', fontWeight: '800' }}>TOTAL QTY</th>
                                     <th rowSpan={2} className="db-num" style={{ verticalAlign: 'middle', fontWeight: '800' }}>TOTAL SALES</th>
                                 </tr>
                                 <tr>
@@ -308,7 +313,7 @@ export default function SalesPeriodicPage() {
                                                     <td className="db-num">₱{(row.monthlyData[m.key]?.sales || 0).toLocaleString(undefined, { minimumFractionDigits: 0 })}</td>
                                                 </Fragment>
                                             ))}
-                                            <td className="db-num" style={{ borderLeft: '2px solid #e2e8f0', fontWeight: '700' }}>
+                                            <td className="db-num" style={{ fontWeight: '700' }}>
                                                 {row.totalQty.toLocaleString()}
                                             </td>
                                             <td className="db-num" style={{ fontWeight: '700' }}>
