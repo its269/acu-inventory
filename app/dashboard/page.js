@@ -121,27 +121,29 @@ export default function DashboardPage() {
     const [totalCount, setTotalCount] = useState(0);
     const [globalStats, setGlobalStats] = useState({ totalValue: 0, lowStock: 0, outOfStock: 0 });
     const [hasMore, setHasMore] = useState(false);
-    const [selectedBranch, setSelectedBranch] = useState(() => {
-        if (typeof window !== "undefined") return localStorage.getItem("db_filter_branch") || "";
-        return "";
-    });
+    const [selectedBranch, setSelectedBranch] = useState("");
     const [branchOptions, setBranchOptions] = useState([]);
-    const [search, setSearch] = useState(() => {
-        if (typeof window !== "undefined") return localStorage.getItem("db_filter_search") || "";
-        return "";
-    });
+    const [search, setSearch] = useState("");
     const [debouncedSearch, setDebouncedSearch] = useState("");
     const [loading, setLoading] = useState(true);
     const [syncing, setSyncing] = useState(false);
     const [syncProgress, setSyncProgress] = useState({ current: 0, total: 27881, stage: "" });
     const [syncLogs, setSyncLogs] = useState([]);
-    const [page, setPage] = useState(() => {
-        if (typeof window !== "undefined") {
-            const stored = localStorage.getItem("db_filter_page");
-            return stored ? parseInt(stored) : 1;
-        }
-        return 1;
-    });
+    const [page, setPage] = useState(1);
+
+    const [userName, setUserName] = useState("User");
+
+    // Restore persisted filters after hydration (client-side only)
+    useEffect(() => {
+        const branch = localStorage.getItem("db_filter_branch") || "";
+        const savedSearch = localStorage.getItem("db_filter_search") || "";
+        const savedPage = parseInt(localStorage.getItem("db_filter_page") || "1");
+        const savedUser = localStorage.getItem("userName") || "";
+        if (branch) setSelectedBranch(branch);
+        if (savedSearch) setSearch(savedSearch);
+        if (savedPage > 1) setPage(savedPage);
+        if (savedUser) setUserName(savedUser);
+    }, []);
 
     // Save filters to localStorage
     useEffect(() => {
@@ -149,12 +151,6 @@ export default function DashboardPage() {
         localStorage.setItem("db_filter_search", search);
         localStorage.setItem("db_filter_page", page.toString());
     }, [selectedBranch, search, page]);
-    const [userName, setUserName] = useState(() => {
-        if (typeof window !== "undefined") {
-            return localStorage.getItem("userName") || "User";
-        }
-        return "User";
-    });
     const [showSyncConfirm, setShowSyncConfirm] = useState(false);
 
     const searchTimer = useRef(null);
@@ -180,7 +176,7 @@ export default function DashboardPage() {
                     const unique = [...new Set(names)].sort();
                     setBranchOptions(unique);
                     DataCache.set(cacheKey, unique);
-                    
+
                     if (!selectedBranch) {
                         const mainBranch = unique.find(n => n.toUpperCase() === "MAIN") || unique.find(n => n.toUpperCase().includes("MAIN"));
                         if (mainBranch) setSelectedBranch(mainBranch);
@@ -214,9 +210,9 @@ export default function DashboardPage() {
 
     useEffect(() => {
         clearTimeout(searchTimer.current);
-        searchTimer.current = setTimeout(() => { 
-            setDebouncedSearch(search); 
-            setPage(1); 
+        searchTimer.current = setTimeout(() => {
+            setDebouncedSearch(search);
+            setPage(1);
         }, 300);
         return () => clearTimeout(searchTimer.current);
     }, [search]);
