@@ -3,6 +3,7 @@
 import { useState, useEffect } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { DataCache } from "@/lib/data-cache";
 import "@/styles/sidebar.css";
 import SyncModal from "./SyncModal";
 
@@ -64,11 +65,12 @@ export default function Sidebar() {
       <div className="sidebar-header">
         <div className="sidebar-brand">
           <span className="sidebar-logo">
-            <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+            {/* <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
               <path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5" />
-            </svg>
+            </svg> */}
+            <img src="/KELIN LOGO-01.png" alt="KGS Logo" style={{ width: '38px', marginLeft: '4px' }} />
           </span>
-          Inventory CMS
+          KGS PURCHASING
         </div>
         <div className="sidebar-user-header">
           <span className="sidebar-user-name">{userName}</span>
@@ -107,16 +109,27 @@ export default function Sidebar() {
       <SyncModal
         isOpen={showSyncModal}
         onClose={() => setShowSyncModal(false)}
-        onSyncComplete={() => window.location.reload()}
+        onSyncComplete={() => {
+          DataCache.clear();
+          window.location.reload();
+        }}
       />
 
       <div className="sidebar-footer">
         <button
           className="sidebar-logout"
           onClick={() => {
+            // Clear user info
             localStorage.removeItem("userName");
             localStorage.removeItem("userFirstName");
             localStorage.removeItem("userLastName");
+
+            // Clear filter persistence
+            Object.keys(localStorage)
+              .filter(k => k.includes("_filter_"))
+              .forEach(k => localStorage.removeItem(k));
+
+            DataCache.clear();
             // Navigate directly — the logout route clears the cookie and
             // redirects to /signin in a single server response.
             window.location.href = "/api/auth/logout";

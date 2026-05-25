@@ -1,8 +1,11 @@
 import "./globals.css";
 
 export const metadata = {
-  title: "Sign In",
+  title: "KGS PURCHASING",
   description: "Sign in to your account",
+  icons: {
+    icon: "/KELIN LOGO-01.png",
+  },
 };
 
 export default function RootLayout({ children }) {

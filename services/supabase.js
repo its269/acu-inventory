@@ -25,14 +25,49 @@ export const SupabaseService = {
             query = query.eq('branch_id', branch);
         }
 
-        // Search filter (on product description)
-        if (search) {
-            query = query.ilike('products.description', `%${search}%`);
-        }
+        // Search filter (on ID or description)
+        let data, count, error;
+        if (!search) {
+            const { data: d, count: c, error: e } = await query
+                .range(from, to)
+                .order('inventory_id', { ascending: true });
+            data = d;
+            count = c;
+            error = e;
+        } else {
+            // Parallel search for ID and Description (consistent with getStockItems pattern)
+            const [byId, byDesc] = await Promise.all([
+                query.ilike('inventory_id', `%${search}%`),
+                supabase
+                    .from('inventory_levels')
+                    .select(`
+                        *,
+                        products!inner (
+                            description,
+                            default_price,
+                            item_class
+                        )
+                    `)
+                    .match(branch ? { branch_id: branch } : {})
+                    .ilike('products.description', `%${search}%`)
+            ]);
 
-        const { data, count, error } = await query
-            .range(from, to)
-            .order('inventory_id', { ascending: true });
+            if (byId.error) throw byId.error;
+            if (byDesc.error) throw byDesc.error;
+
+            const seen = new Set();
+            const merged = [];
+            for (const item of [...(byId.data || []), ...(byDesc.data || [])]) {
+                const key = `${item.inventory_id}||${item.branch_id}||${item.site_id}`;
+                if (!seen.has(key)) {
+                    seen.add(key);
+                    merged.push(item);
+                }
+            }
+            merged.sort((a, b) => (a.inventory_id ?? "").localeCompare(b.inventory_id ?? ""));
+            count = merged.length;
+            data = merged.slice(from, to + 1);
+        }
 
         if (error) throw error;
 
@@ -59,21 +94,61 @@ export const SupabaseService = {
      * Calculate global stats (Total Value, Low Stock, etc.) instantly from Supabase
      */
     async getGlobalStats(branch, search) {
-        // We use a separate query for stats to be accurate across all records, not just the page
-        let query = supabase
-            .from('inventory_levels')
-            .select(`
-                on_hand,
-                products (
-                    default_price,
-                    description
-                )
-            `);
+        let data, error;
 
-        if (branch) query = query.eq('branch_id', branch);
-        if (search) query = query.ilike('products.description', `%${search}%`);
+        if (!search) {
+            const res = await supabase
+                .from('inventory_levels')
+                .select(`
+                    on_hand,
+                    products (
+                        default_price,
+                        description
+                    )
+                `)
+                .match(branch ? { branch_id: branch } : {});
+            data = res.data;
+            error = res.error;
+        } else {
+            const [byId, byDesc] = await Promise.all([
+                supabase
+                    .from('inventory_levels')
+                    .select(`
+                        inventory_id, branch_id, site_id, on_hand,
+                        products (
+                            default_price,
+                            description
+                        )
+                    `)
+                    .match(branch ? { branch_id: branch } : {})
+                    .ilike('inventory_id', `%${search}%`),
+                supabase
+                    .from('inventory_levels')
+                    .select(`
+                        inventory_id, branch_id, site_id, on_hand,
+                        products!inner (
+                            default_price,
+                            description
+                        )
+                    `)
+                    .match(branch ? { branch_id: branch } : {})
+                    .ilike('products.description', `%${search}%`)
+            ]);
 
-        const { data, error } = await query;
+            if (byId.error) throw byId.error;
+            if (byDesc.error) throw byDesc.error;
+
+            const seen = new Set();
+            data = [];
+            for (const item of [...(byId.data || []), ...(byDesc.data || [])]) {
+                const key = `${item.inventory_id}||${item.branch_id}||${item.site_id}`;
+                if (!seen.has(key)) {
+                    seen.add(key);
+                    data.push(item);
+                }
+            }
+        }
+
         if (error) throw error;
 
         let totalValue = 0;

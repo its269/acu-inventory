@@ -2,6 +2,7 @@
 
 import { useEffect, useState, useCallback, useMemo, useRef, memo } from "react";
 import { useRouter } from "next/navigation";
+import { DataCache } from "@/lib/data-cache";
 import "@/styles/dashboard.css";
 
 /* ── SVG Icons ─────────────────────────────────────────────── */
@@ -129,12 +130,27 @@ export default function DashboardPage() {
     const [syncProgress, setSyncProgress] = useState({ current: 0, total: 27881, stage: "" });
     const [syncLogs, setSyncLogs] = useState([]);
     const [page, setPage] = useState(1);
-    const [userName, setUserName] = useState(() => {
-        if (typeof window !== "undefined") {
-            return localStorage.getItem("userName") || "User";
-        }
-        return "User";
-    });
+
+    const [userName, setUserName] = useState("User");
+
+    // Restore persisted filters after hydration (client-side only)
+    useEffect(() => {
+        const branch = localStorage.getItem("db_filter_branch") || "";
+        const savedSearch = localStorage.getItem("db_filter_search") || "";
+        const savedPage = parseInt(localStorage.getItem("db_filter_page") || "1");
+        const savedUser = localStorage.getItem("userName") || "";
+        if (branch) setSelectedBranch(branch);
+        if (savedSearch) setSearch(savedSearch);
+        if (savedPage > 1) setPage(savedPage);
+        if (savedUser) setUserName(savedUser);
+    }, []);
+
+    // Save filters to localStorage
+    useEffect(() => {
+        localStorage.setItem("db_filter_branch", selectedBranch);
+        localStorage.setItem("db_filter_search", search);
+        localStorage.setItem("db_filter_page", page.toString());
+    }, [selectedBranch, search, page]);
     const [showSyncConfirm, setShowSyncConfirm] = useState(false);
 
     const searchTimer = useRef(null);
@@ -143,6 +159,14 @@ export default function DashboardPage() {
     /* ── Init Data ────────────────────────────────────────── */
     useEffect(() => {
         const fetchBranches = async () => {
+            const cacheKey = "branches";
+            const cached = DataCache.get(cacheKey);
+            if (cached) {
+                setBranchOptions(cached);
+                const mainBranch = cached.find(n => n.toUpperCase() === "MAIN") || cached.find(n => n.toUpperCase().includes("MAIN"));
+                if (mainBranch && !selectedBranch) setSelectedBranch(mainBranch);
+            }
+
             try {
                 const res = await fetch("/api/branches");
                 if (res.ok) {
@@ -151,9 +175,12 @@ export default function DashboardPage() {
                     const names = list.map((b) => b.SiteID || b.BranchName?.value).filter(Boolean);
                     const unique = [...new Set(names)].sort();
                     setBranchOptions(unique);
-                    // Default to the "MAIN" branch if it exists, otherwise leave as All Branches
-                    const mainBranch = unique.find(n => n.toUpperCase() === "MAIN") || unique.find(n => n.toUpperCase().includes("MAIN"));
-                    if (mainBranch) setSelectedBranch(mainBranch);
+                    DataCache.set(cacheKey, unique);
+
+                    if (!selectedBranch) {
+                        const mainBranch = unique.find(n => n.toUpperCase() === "MAIN") || unique.find(n => n.toUpperCase().includes("MAIN"));
+                        if (mainBranch) setSelectedBranch(mainBranch);
+                    }
                 }
             } catch (err) { console.error("Branch fetch error", err); }
         };
@@ -161,10 +188,12 @@ export default function DashboardPage() {
     }, []);
 
     /* ── Fetch Data ───────────────────────────────────────── */
-    const fetchInventory = useCallback(async () => {
-        setLoading(true);
+    const fetchInventory = useCallback(async (isBackground = false) => {
+        if (!isBackground) setLoading(true);
         try {
             const dataParams = new URLSearchParams({ page: String(page), pageSize: String(ROWS_PER_PAGE), search: debouncedSearch, branch: selectedBranch, count: "true", stats: "true", source: "supabase" });
+            const cacheKey = `inventory_${dataParams.toString()}`;
+
             const res = await fetch(`/api/inventory?${dataParams.toString()}`);
             if (res.status === 401) { router.push("/signin"); return; }
             if (res.ok) {
@@ -173,6 +202,7 @@ export default function DashboardPage() {
                 setTotalCount(result.totalCount || 0);
                 setHasMore(!!result.hasMore);
                 if (result.globalStats) setGlobalStats(result.globalStats);
+                DataCache.set(cacheKey, result);
             }
         } catch (e) { console.error("Fetch error", e); }
         setLoading(false);
@@ -180,21 +210,30 @@ export default function DashboardPage() {
 
     useEffect(() => {
         clearTimeout(searchTimer.current);
-        searchTimer.current = setTimeout(() => { 
-            setDebouncedSearch(search); 
-            setPage(1); 
-        }, 400);
+        searchTimer.current = setTimeout(() => {
+            setDebouncedSearch(search);
+            setPage(1);
+        }, 300);
         return () => clearTimeout(searchTimer.current);
     }, [search]);
 
     useEffect(() => {
-        // Use a microtask to avoid synchronous state update in effect body
-        const controller = new AbortController();
-        Promise.resolve().then(() => {
-            if (!controller.signal.aborted) fetchInventory();
-        });
-        return () => controller.abort();
-    }, [fetchInventory]);
+        const dataParams = new URLSearchParams({ page: String(page), pageSize: String(ROWS_PER_PAGE), search: debouncedSearch, branch: selectedBranch, count: "true", stats: "true", source: "supabase" });
+        const cacheKey = `inventory_${dataParams.toString()}`;
+
+        const cached = DataCache.get(cacheKey);
+        if (cached) {
+            setAllInventory(cached.data || []);
+            setTotalCount(cached.totalCount || 0);
+            setHasMore(!!cached.hasMore);
+            if (cached.globalStats) setGlobalStats(cached.globalStats);
+            setLoading(false);
+            // Re-fetch in background
+            fetchInventory(true);
+        } else {
+            fetchInventory(false);
+        }
+    }, [page, debouncedSearch, selectedBranch, fetchInventory]);
 
     const initials = useMemo(() => {
         const parts = userName.split(" ");

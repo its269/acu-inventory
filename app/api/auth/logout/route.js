@@ -10,7 +10,7 @@ export async function GET(request) {
     if (sessionId) deleteSession(sessionId);
 
     const response = NextResponse.redirect(
-        new URL("/signin", process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000")
+        new URL("/signin", request.url)
     );
     response.cookies.set("acu_session", "", { httpOnly: true, sameSite: "lax", path: "/", maxAge: 0 });
     console.log("[Logout] Done — redirecting to /signin");
