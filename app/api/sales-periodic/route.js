@@ -7,10 +7,10 @@ export async function GET(request) {
     try {
         const { searchParams } = new URL(request.url);
         const branch = searchParams.get("branch") || "";
-        const targetMonth = parseInt(searchParams.get("month")); // 1-12
+        const targetMonth = parseInt(searchParams.get("month")); 
         const targetYear = parseInt(searchParams.get("year"));
         const page = parseInt(searchParams.get("page") || "1");
-        const pageSize = parseInt(searchParams.get("pageSize") || "50");
+        const pageSize = parseInt(searchParams.get("pageSize") || "15");
 
         if (!targetMonth || !targetYear) {
             return NextResponse.json({ message: "Month and Year are required" }, { status: 400 });
@@ -20,89 +20,68 @@ export async function GET(request) {
         const cookie = getSession(sessionId);
         if (!cookie) return NextResponse.json({ message: "Unauthorized" }, { status: 401 });
 
-        const ACU_BASE = "https://accounting.holocrontrackertrading.com/ERP/entity/Default/20.200.001";
-        try {
-            await AcumaticaService.fetchWithRetry(`${ACU_BASE}/StockItem?$top=1`, cookie);
-        } catch (e) {
-            return NextResponse.json({ message: "Session expired" }, { status: 401 });
-        }
-
-        // 1. Calculate Target Date Range (Selected Month + Next 2 Months)
-        const startLimit = new Date(targetYear, targetMonth - 1, 1, 0, 0, 0);
-        const endLimit = new Date(targetYear, targetMonth + 2, 0, 23, 59, 59);
-        
-        const formatACU = (d) => d.toISOString().split('T')[0];
-        const startDate = formatACU(startLimit);
-        const endDate = formatACU(endLimit);
-
-        // 2. Fetch Data (Unfiltered for stability)
-        const invoices = await AcumaticaService.fetchSalesInvoicesByDateRange({ 
-            cookie, 
-            startDate, 
-            endDate 
-        });
-
-        const getF = (obj, keyName) => {
-            if (!obj) return "";
-            const k = Object.keys(obj).find(i => i.toLowerCase() === keyName.toLowerCase());
-            if (!k) return "";
-            const val = obj[k];
-            return (val?.value !== undefined ? val.value : val) ?? "";
-        };
-        const getAny = (obj, ...keys) => {
-            for (const k of keys) {
-                const v = getF(obj, k);
-                if (v !== "" && v !== null && v !== undefined) return v;
-            }
-            return "";
-        };
-
-        // 3. Define consecutive months to show
+        // 1. Calculate the target 3 months
         const targetMonths = [];
         for (let i = 0; i < 3; i++) {
             const d = new Date(targetYear, targetMonth - 1 + i, 1);
-            const mKey = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
-            const mLabel = d.toLocaleString('default', { month: 'short', year: 'numeric' });
-            targetMonths.push({ key: mKey, label: mLabel, date: d });
+            if (d > new Date()) break;
+            targetMonths.push({ month: d.getMonth() + 1, year: d.getFullYear() });
         }
 
-        // 4. Discover data
-        let filteredInvoices = invoices.filter(inv => {
-            const d = new Date(getF(inv, "Date"));
-            return d >= startLimit && d <= endLimit;
+        // 2. Fetch Data from Acumatica (Now passing correct objects)
+        const invoices = await AcumaticaService.fetchSalesBySpecificMonths({
+            cookie,
+            targetMonths
         });
 
-        let displayMonths = targetMonths;
-        if (filteredInvoices.length === 0 && invoices.length > 0) {
-            filteredInvoices = invoices;
-            const latestFound = new Date(getF(invoices[0], "Date"));
-            const anchor = new Date(latestFound.getFullYear(), latestFound.getMonth(), 1);
-            displayMonths = [];
-            for (let i = 2; i >= 0; i--) {
-                const d = new Date(anchor.getFullYear(), anchor.getMonth() - i, 1);
-                displayMonths.push({
-                    key: `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`,
+        const getF = (obj, k) => {
+            if (!obj) return "";
+            const key = Object.keys(obj).find(i => i.toLowerCase() === k.toLowerCase());
+            if (!key) return "";
+            const val = obj[key];
+            if (val === null || val === undefined) return "";
+            if (typeof val === "object") return val.value ?? "";
+            return val;
+        };
+
+        // 3. Discover months from actual data to build headers
+        const monthMap = new Map();
+        for (const inv of invoices) {
+            const pKey = getF(inv, "PostPeriod");
+            if (!pKey) continue;
+            
+            if (!monthMap.has(pKey)) {
+                const d = new Date(getF(inv, "Date"));
+                monthMap.set(pKey, {
+                    key: pKey,
                     label: d.toLocaleString('default', { month: 'short', year: 'numeric' }),
                     date: d
                 });
             }
         }
 
-        // 5. Aggregate
+        const sortedMonths = Array.from(monthMap.values()).sort((a, b) => a.date - b.date);
+
+        // 4. Aggregate
         const grouped = {};
         const { data: catalog } = await supabase.from("products").select("inventory_id,item_class,description");
         const productMap = new Map((catalog || []).map(p => [p.inventory_id.toUpperCase().trim(), p]));
 
-        for (const inv of filteredInvoices) {
-            const docDate = new Date(getF(inv, "Date"));
-            const mKey = `${docDate.getFullYear()}-${String(docDate.getMonth() + 1).padStart(2, '0')}`;
-            if (!displayMonths.some(m => m.key === mKey)) continue;
+        let totalRevenue = 0;
+        let totalQtySold = 0;
 
-            const hBranch = getAny(inv, "Branch", "BranchID") || "";
-            for (const line of (inv.Details || [])) {
+        for (const inv of invoices) {
+            const pKey = getF(inv, "PostPeriod");
+            const invType = getF(inv, "Type");
+            const isReturn = invType === "Credit Memo" || invType === "Return";
+            const hBranch = getF(inv, "Branch") || getF(inv, "BranchID") || "";
+            const details = Array.isArray(inv.Details) ? inv.Details : (inv.Details?.value || []);
+
+            for (const line of details) {
                 const invId = String(getF(line, "InventoryID")).trim();
                 if (!invId) continue;
-                const lBranch = String(getAny(line, "BranchID", "Branch") || hBranch || "").trim();
+
+                const lBranch = String(getF(line, "Branch") || getF(line, "BranchID") || hBranch || "").trim();
                 if (branch && branch !== "All Branches" && lBranch.toLowerCase() !== branch.toLowerCase()) continue;
 
                 const groupKey = `${invId}|${lBranch}`;
@@ -111,42 +90,54 @@ export async function GET(request) {
                     grouped[groupKey] = {
                         inventoryId: invId,
                         branchName: lBranch,
-                        description: p?.description || String(getAny(line, "TransactionDescr", "Description") || "").trim(),
+                        description: p?.description || getF(line, "Description") || "—",
                         itemClass: p?.item_class || "",
                         monthlyData: {},
                         totalQty: 0,
                         totalSales: 0
                     };
-                    displayMonths.forEach(m => { grouped[groupKey].monthlyData[m.key] = { qty: 0, sales: 0 }; });
+                    sortedMonths.forEach(m => { grouped[groupKey].monthlyData[m.key] = { qty: 0, sales: 0 }; });
                 }
 
-                const qty = Number(getAny(line, "Qty", "Quantity") || 0);
-                const sales = Number(getAny(line, "Amount", "ExtCost", "ExtPrice") || 0);
-                if (grouped[groupKey].monthlyData[mKey]) {
-                    grouped[groupKey].monthlyData[mKey].qty += qty;
-                    grouped[groupKey].monthlyData[mKey].sales += sales;
+                let qty = Number(getF(line, "Qty") || getF(line, "Quantity") || 0);
+                let sales = Number(getF(line, "Amount") || getF(line, "ExtendedPrice") || 0);
+
+                if (isReturn) {
+                    qty = -Math.abs(qty);
+                    sales = -Math.abs(sales);
+                }
+
+                if (grouped[groupKey].monthlyData[pKey]) {
+                    grouped[groupKey].monthlyData[pKey].qty += qty;
+                    grouped[groupKey].monthlyData[pKey].sales += sales;
                 }
                 grouped[groupKey].totalQty += qty;
                 grouped[groupKey].totalSales += sales;
+                totalRevenue += sales;
+                totalQtySold += qty;
             }
         }
+
+        // Overall stocks
+        let overallStocks = 0;
+        try {
+            const sQuery = supabase.from("warehouse_stock").select("on_hand");
+            if (branch && branch !== "All Branches") sQuery.eq("warehouse_id", branch);
+            const { data: sData } = await sQuery;
+            overallStocks = (sData || []).reduce((sum, item) => sum + (item.on_hand || 0), 0);
+        } catch (e) {}
 
         const finalResults = Object.values(grouped).sort((a, b) => b.totalSales - a.totalSales);
 
         return NextResponse.json({
             data: finalResults.slice((page - 1) * pageSize, page * pageSize),
-            months: displayMonths.map(m => ({ key: m.key, label: m.label })),
-            pagination: {
-                page,
-                pageSize,
-                totalItems: finalResults.length,
-                totalPages: Math.ceil(finalResults.length / pageSize)
-            }
+            months: sortedMonths.map(m => ({ key: m.key, label: m.label })),
+            metrics: { overallStocks, totalRevenue, uniqueProducts: finalResults.length, totalQtySold },
+            pagination: { page, pageSize, totalItems: finalResults.length, totalPages: Math.ceil(finalResults.length / pageSize) }
         });
 
     } catch (err) {
         console.error("[Periodic Sales API Error]", err);
-        if (err.message === "Unauthorized") return NextResponse.json({ message: "Unauthorized" }, { status: 401 });
-        return NextResponse.json({ message: "Failed to fetch periodic sales", error: err.message }, { status: 500 });
+        return NextResponse.json({ message: "Error processing sales" }, { status: 500 });
     }
 }
