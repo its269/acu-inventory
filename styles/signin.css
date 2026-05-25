@@ -279,3 +279,30 @@
         transform: rotate(360deg);
     }
 }
+
+/* ============================================================
+   RESPONSIVENESS — MEDIA QUERIES
+   ============================================================ */
+
+@media (max-width: 640px) {
+    .signin-wrapper {
+        padding: 1rem;
+        background: #fff;
+    }
+    
+    .signin-card {
+        padding: 1.5rem;
+        box-shadow: none;
+        border: none;
+        width: 100%;
+    }
+    
+    .signin-title {
+        font-size: 1.5rem;
+    }
+    
+    .signin-logo {
+        width: 48px;
+        height: 48px;
+    }
+}

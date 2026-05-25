@@ -124,3 +124,20 @@
     transform: translateY(-1px);
     box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
 }
+
+/* ============================================================
+   RESPONSIVENESS — MEDIA QUERIES
+   ============================================================ */
+
+@media (max-width: 768px) {
+    .db-modal-fullwide {
+        width: 100vw;
+        height: 100vh;
+        max-height: 100vh;
+        border-radius: 0;
+    }
+    
+    .db-modal-header {
+        padding: 1rem;
+    }
+}

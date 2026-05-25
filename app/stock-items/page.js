@@ -84,8 +84,8 @@ export default function StockItemsPage() {
     const totalPages = Math.max(1, Math.ceil(totalCount / PAGE_SIZE));
 
     return (
-        <div className="db-root" style={{ display: 'block', background: '#f8fafc', minHeight: '100vh' }}>
-            <main className="db-main" style={{ maxWidth: '1400px' }}>
+        <div className="db-root">
+            <main className="db-main">
                 <div className="db-page-title">
                     <h1>Stock Items Masterlist</h1>
                     <p>View all products and their configurations. Click a row to see detailed branch availability.</p>

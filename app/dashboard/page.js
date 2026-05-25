@@ -243,8 +243,8 @@ export default function DashboardPage() {
 
     /* ── Render ───────────────────────────────────────────── */
     return (
-        <div className="db-root" style={{ display: 'block', background: '#f8fafc', minHeight: '100vh' }}>
-            <main className="db-main" style={{ maxWidth: '1400px' }}>
+        <div className="db-root">
+            <main className="db-main">
                 <div className="db-page-title">
                     <h1>Inventory Dashboard</h1>
                     <p>Manage and monitor stock levels across all locations.</p>

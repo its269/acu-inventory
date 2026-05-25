@@ -149,8 +149,8 @@ export default function POPage() {
     const toggleExpand = (key) => setExpanded(prev => ({ ...prev, [key]: !prev[key] }));
 
     return (
-        <div className="db-root" style={{ display: 'block', background: '#f8fafc', minHeight: '100vh' }}>
-            <main className="db-main" style={{ maxWidth: '1400px' }}>
+        <div className="db-root">
+            <main className="db-main">
                 <div className="db-page-title">
                     <h1>Incoming Purchase Orders</h1>
                     <p>Track and manage open purchase orders live from Acumatica ERP.</p>
