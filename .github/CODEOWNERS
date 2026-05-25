@@ -1,0 +1,10 @@
+# Automatic Reviewers for ACU Inventory
+# Format: [File Pattern] [Reviewers]
+
+# Lahat ng changes sa codebase ay kailangang i-review nina:
+*       @its269 @sis0n
+
+# Specific reviewers para sa security at architecture (Gemini/Copilot focus)
+/services/      @its269
+/app/api/       @its269
+.gemini/        @its269
