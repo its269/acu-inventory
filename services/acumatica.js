@@ -196,11 +196,42 @@ export const AcumaticaService = {
             console.log(`>>> [Acumatica] [Req #${syncId}] Discovered ERP Period IDs:`, discoveredIds);
 
             if (discoveredIds.length === 0) {
-                console.log(`>>> [Acumatica] [Req #${syncId}] No matching periods found in ERP. Falling back to latest data.`);
-                const url = `${ACU_BASE}/Invoice?$expand=Details&$top=100&$orderby=Date desc`;
-                const res = await this.fetchWithRetry(url, cookie);
-                const data = await res.json();
-                return data.value || [];
+                console.log(`>>> [Acumatica] [Req #${syncId}] No matching periods found in ERP. Falling back to date-based range.`);
+                
+                const startMonth = targetMonths[0];
+                const endMonth = targetMonths[targetMonths.length - 1];
+                if (!startMonth) return [];
+
+                const startDate = `${startMonth.year}-${String(startMonth.month).padStart(2, '0')}-01T00:00:00Z`;
+                const lastDay = new Date(endMonth.year, endMonth.month, 0).getDate();
+                const endDate = `${endMonth.year}-${String(endMonth.month).padStart(2, '0')}-${String(lastDay).padStart(2, '0')}T23:59:59Z`;
+
+                // Try multiple entities to find real sales
+                const entities = ["Invoice", "SalesInvoice", "CashSale"];
+                const flatResults = [];
+
+                for (const entity of entities) {
+                    if (signal.aborted) break;
+                    console.log(`>>> [Acumatica] [Req #${syncId}] Trying ${entity} (Limit 2000, OrderBy Amount Desc)...`);
+                    
+                    const filter = `Date ge datetimeoffset'${startDate}' and Date le datetimeoffset'${endDate}'`;
+                    const url = `${ACU_BASE}/${entity}?$expand=Details&$top=2000&$filter=${filter}&$orderby=Amount desc`;
+                    
+                    try {
+                        const res = await this.fetchWithRetry(url, cookie, { signal });
+                        const data = await res.json();
+                        const items = data.value || (Array.isArray(data) ? data : []);
+                        console.log(`>>> [Acumatica] [Req #${syncId}] Found ${items.length} records in ${entity}.`);
+                        if (items.length > 0) {
+                            flatResults.push(...items);
+                        }
+                    } catch (e) {
+                        console.warn(`>>> [Acumatica] [Req #${syncId}] ${entity} fetch failed:`, e.message);
+                    }
+                }
+                
+                console.log(`>>> [Acumatica] [Req #${syncId}] TOTAL FALLBACK RECORDS: ${flatResults.length}`);
+                return flatResults;
             }
 
             // 2. FETCH DATA USING DISCOVERED IDs
@@ -210,11 +241,12 @@ export const AcumaticaService = {
                 while (true) {
                     if (signal.aborted) break;
                     console.log(`>>> [Acumatica] [Req #${syncId}] Fetching Period ${id} (Skip ${skip})...`);
+                    // Try Invoice for period-based fetching
                     const url = `${ACU_BASE}/Invoice?$expand=Details&$top=${pageSize}&$skip=${skip}&$filter=PostPeriod eq '${id}'`;
                     
                     const res = await this.fetchWithRetry(url, cookie, { signal });
                     const data = await res.json();
-                    const items = data.value || [];
+                    const items = data.value || (Array.isArray(data) ? data : []);
                     
                     results.push(...items);
                     if (items.length < pageSize) break;
