@@ -40,13 +40,25 @@ export async function GET(request) {
         const cookie = getSession(sessionId);
         if (!cookie) return NextResponse.json({ message: "Unauthorized" }, { status: 401 });
 
-        // 1. Calculate the target 3 months
+        // 1. Calculate the target 3 months AND pre-populate month map to avoid duplicates
         const targetMonths = [];
+        const monthMap = new Map();
         for (let i = 0; i < 3; i++) {
             const d = new Date(targetYear, targetMonth - 1 + i, 1);
             if (d > new Date()) break;
-            targetMonths.push({ month: d.getMonth() + 1, year: d.getFullYear() });
+            const m = d.getMonth() + 1;
+            const y = d.getFullYear();
+            const key = `${y}${String(m).padStart(2, '0')}`; // Standardized YYYYMM key
+            
+            targetMonths.push({ month: m, year: y });
+            monthMap.set(key, {
+                key,
+                label: d.toLocaleString('default', { month: 'short', year: 'numeric' }).toUpperCase(),
+                date: d
+            });
         }
+
+        const sortedMonths = Array.from(monthMap.values()).sort((a, b) => a.date - b.date);
 
         // 2. Fetch Data from Acumatica
         const rawInvoices = await AcumaticaService.fetchSalesBySpecificMonths({
@@ -66,31 +78,6 @@ export async function GET(request) {
         const invoices = Array.from(invoiceMap.values());
         console.log(`>>> [Sales API] De-duplicated from ${rawInvoices.length} to ${invoices.length} unique records.`);
 
-        // 3. Discover months from actual data to build headers
-        const monthMap = new Map();
-        for (const inv of invoices) {
-            let pKey = getAny(inv, "PostPeriod", "FinancialPeriod", "Period");
-            const dateStr = getAny(inv, "Date", "DocumentDate");
-            
-            if (!pKey && dateStr) {
-                const d = new Date(dateStr);
-                pKey = `${String(d.getMonth() + 1).padStart(2, '0')}${d.getFullYear()}`;
-            }
-
-            if (!pKey) continue;
-            
-            if (!monthMap.has(pKey)) {
-                const d = new Date(dateStr);
-                monthMap.set(pKey, {
-                    key: pKey,
-                    label: d.toLocaleString('default', { month: 'short', year: 'numeric' }),
-                    date: d
-                });
-            }
-        }
-
-        const sortedMonths = Array.from(monthMap.values()).sort((a, b) => a.date - b.date);
-
         // 4. Aggregate
         const grouped = {};
         const { data: catalog } = await supabase.from("products").select("inventory_id,item_class,description");
@@ -100,13 +87,15 @@ export async function GET(request) {
         let totalQtySold = 0;
 
         for (const inv of invoices) {
-            let pKey = getAny(inv, "PostPeriod", "FinancialPeriod", "Period");
+            // Normalize pKey using Date (most reliable across all entities)
             const dateStr = getAny(inv, "Date", "DocumentDate");
+            if (!dateStr) continue;
+            
+            const d = new Date(dateStr);
+            const pKey = `${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, '0')}`;
 
-            if (!pKey && dateStr) {
-                const d = new Date(dateStr);
-                pKey = `${String(d.getMonth() + 1).padStart(2, '0')}${d.getFullYear()}`;
-            }
+            // Skip if not in our target window (though Acumatica filter should handle this)
+            if (!monthMap.has(pKey)) continue;
 
             const invType = String(getAny(inv, "Type", "DocumentType")).trim();
             const isReturn = invType === "Credit Memo" || invType === "Return" || invType === "Credit Adj.";
