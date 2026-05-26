@@ -1,5 +1,6 @@
 import { AcumaticaService } from "@/services/acumatica";
 import { SupabaseService } from "@/services/supabase";
+import { getSession } from "@/lib/session-store";
 
 export const runtime = "nodejs";
 
@@ -9,7 +10,6 @@ export const runtime = "nodejs";
  */
 export async function GET(request) {
     try {
-        const cookie = request.headers.get("cookie") || "";
         const { searchParams } = new URL(request.url);
 
         const page = parseInt(searchParams.get("page") || "1");
@@ -47,6 +47,10 @@ export async function GET(request) {
             }
         } else {
             console.log("[BFF] Fetching from Acumatica...");
+            const sessionId = request.cookies.get("acu_session")?.value;
+            const cookie = getSession(sessionId);
+            if (!cookie) return Response.json({ message: "Unauthorized" }, { status: 401 });
+
             result = await AcumaticaService.getStockItems({
                 page,
                 pageSize,

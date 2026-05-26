@@ -7,8 +7,13 @@ export const dynamic = "force-dynamic";
 
 export async function GET(request) {
     const sessionId = request.cookies.get("acu_session")?.value;
+    console.log(`[PO API] Request received. sessionId: ${sessionId || "(none)"}`);
+    
     const cookie = getSession(sessionId);
-    if (!cookie) return NextResponse.json({ message: "Unauthorized" }, { status: 401 });
+    if (!cookie) {
+        console.warn(`[PO API] Unauthorized: No valid session found for sessionId: ${sessionId || "(none)"}`);
+        return NextResponse.json({ message: "Unauthorized" }, { status: 401 });
+    }
 
     const { searchParams } = new URL(request.url);
     const page = Math.max(1, parseInt(searchParams.get("page") || "1"));

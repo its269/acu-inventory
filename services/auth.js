@@ -38,7 +38,14 @@ export const AuthService = {
             throw new Error(parseAcuError(raw));
         }
 
-        return res.headers.getSetCookie();
+        const cookies = res.headers.getSetCookie();
+        if (cookies && cookies.length > 0) return cookies;
+
+        // Fallback for older environments or specific headers
+        const singleCookie = res.headers.get("Set-Cookie");
+        if (singleCookie) return [singleCookie];
+
+        return [];
     },
 
     async logout(cookie) {

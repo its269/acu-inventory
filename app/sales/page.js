@@ -184,8 +184,8 @@ export default function SalesPeriodicPage() {
     }, [salesData, selectedBranch, targetMonth, targetYear, months]);
 
     return (
-        <div className="db-root" style={{ display: 'block', background: '#f8fafc', minHeight: '100vh' }}>
-            <main className="db-main" style={{ maxWidth: '100%' }}>
+        <div className="db-root">
+            <main className="db-main">
                 <div className="db-page-title">
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
                         <div>
