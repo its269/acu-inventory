@@ -16,9 +16,9 @@ jobs:
       - name: Checkout Code
         uses: actions/checkout@v4
 
-      # Ito ang tamang action para kay Gemini
+      # Ginamit ang @v0 para makuha ang latest stable version
       - name: Run Gemini Review
-        uses: google-github-actions/run-gemini-cli@v0.1
+        uses: google-github-actions/run-gemini-cli@v0
         with:
           args: review --files .
         env:
