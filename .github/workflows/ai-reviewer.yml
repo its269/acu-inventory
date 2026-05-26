@@ -31,6 +31,6 @@ jobs:
           fi
 
       - name: Run Gemini Review
-        run: npx -y @google/gemini-cli review --files .
+        run: npx -y @google/gemini-cli --prompt "Review the code changes in this PR. Focus on security, architecture, and code quality."
         env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
