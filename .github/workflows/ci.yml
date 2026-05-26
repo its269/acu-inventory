@@ -1,0 +1,91 @@
+name: ACU Inventory CI
+
+on:
+  push:
+    branches: [ "main", "feat/**", "fix/**" ]
+  pull_request:
+    branches: [ "main" ]
+    types: [opened, synchronize, reopened, ready_for_review, edited]
+  pull_request_review:
+    types: [submitted]
+  pull_request_review_comment:
+    types: [created, edited, deleted]
+
+jobs:
+  # Job 1: Build check para sa Next.js
+  build-and-lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+      - name: Install Dependencies
+        run: npm install
+      - name: Next.js Build
+        run: npm run build
+        env:
+          # Ilagay dito ang dummy envs kung kailangan ng build
+          NEXT_PUBLIC_ACUMATICA_URL: "https://mock.acumatica.com"
+
+  # Job 2: Check if all conversations (including AI) are resolved
+  check-review-resolution:
+    if: github.event_name != 'push'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check for unresolved conversations
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          PR_NUMBER=${{ github.event.pull_request.number }}
+          if [ -z "$PR_NUMBER" ]; then
+            PR_NUMBER=$(jq -r .pull_request.number "$GITHUB_EVENT_PATH")
+          fi
+          
+          echo "Checking PR #$PR_NUMBER for unresolved review conversations..."
+          
+          # GraphQL query para sa resolution check
+          UNRESOLVED_COUNT=$(gh api graphql -F owner="${{ github.repository_owner }}" -F repo="${{ github.event.repository.name }}" -F pr="$PR_NUMBER" -f query='
+            query($owner:String!, $repo:String!, $pr:Int!) {
+              repository(owner:$owner, name:$repo) {
+                pullRequest(number:$pr) {
+                  reviewThreads(first: 100) {
+                    nodes {
+                      isResolved
+                    }
+                  }
+                }
+              }
+            }' --jq '.data.repository.pullRequest.reviewThreads.nodes | map(select(.isResolved == false)) | length')
+          
+          if [ "$UNRESOLVED_COUNT" -gt 0 ]; then
+            echo "Error: There are $UNRESOLVED_COUNT unresolved review threads."
+            echo "All conversations (including those from AI assist) must be resolved before merging."
+            exit 1
+          fi
+          echo "All review conversations are resolved."
+
+  # Job 3: Final Status Check
+  ci-status-check:
+    needs: [build-and-lint, check-review-resolution]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check Overall Success
+        run: |
+          if [[ "${{ needs.build-and-lint.result }}" == "failure" || "${{ needs.build-and-lint.result }}" == "cancelled" ]]; then
+            echo "Build or Lint failed."
+            exit 1
+          fi
+          
+          if [[ "${{ github.event_name }}" != "push" ]]; then
+            if [[ "${{ needs.check-review-resolution.result }}" == "failure" || "${{ needs.check-review-resolution.result }}" == "cancelled" ]]; then
+              echo "Review resolution check failed. Please resolve all conversations."
+              exit 1
+            fi
+          fi
+          
+          echo "All CI checks passed."
+          exit 0
