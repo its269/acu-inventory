@@ -1,3 +1,13 @@
+---
+name: security-auditor
+description: Dedicated agent for auditing security practices in the ACU Inventory codebase.
+tools:
+  - "*"
+model: gemini-3-flash-preview
+temperature: 0.2
+max_turns: 10
+---
+
 # Agent: Security Auditor
 
 Dedicated agent for auditing security practices in the ACU Inventory codebase.

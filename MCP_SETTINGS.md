@@ -17,7 +17,7 @@ I-copy at i-paste ito sa iyong `.gemini/settings.json`:
         "@modelcontextprotocol/server-github"
       ],
       "env": {
-        "GITHUB_PERSONAL_ACCESS_TOKEN": "token to"
+        "GITHUB_PERSONAL_ACCESS_TOKEN": "YOUR_GITHUB_TOKEN_HERE"
       }
     },
     "fetch": {
