@@ -36,3 +36,4 @@ The project follows a **Streaming Backend-for-Frontend (BFF)** pattern:
 
 ---
 *ACU Inventory — Efficient Inventory Management via Acumatica.*
+<!-- Automation Trigger: Gemini Reviewer enabled -->
