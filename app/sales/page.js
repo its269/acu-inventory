@@ -43,16 +43,26 @@ export default function SalesPeriodicPage() {
     const [mounted, setMounted] = useState(false);
     const [branchOptions, setBranchOptions] = useState([]);
     const [selectedBranch, setSelectedBranch] = useState("");
-    const [salesData, setSalesData] = useState([]);
+    const [allSalesData, setAllSalesData] = useState([]); // Store everything
+    const [salesData, setSalesData] = useState([]);      // Current page slice
     const [months, setMonths] = useState([]);
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState("");
     
-    const [pagination, setPagination] = useState({ page: 1, pageSize: 15, totalItems: 0, totalPages: 0 });
+    const [currentPage, setCurrentPage] = useState(1);
+    const [pageSize] = useState(15);
+    const [pagination, setPagination] = useState({ totalItems: 0, totalPages: 0 });
     const [metrics, setMetrics] = useState({ overallStocks: 0, totalRevenue: 0, uniqueProducts: 0, totalQtySold: 0 });
     
     const [targetMonth, setTargetMonth] = useState(new Date().getMonth() + 1);
     const [targetYear, setTargetYear] = useState(currentYear);
+
+    // Update current page slice whenever allSalesData or currentPage changes
+    useEffect(() => {
+        const start = (currentPage - 1) * pageSize;
+        const end = start + pageSize;
+        setSalesData(allSalesData.slice(start, end));
+    }, [allSalesData, currentPage, pageSize]);
 
     // Initial hydration and restore from localStorage
     useEffect(() => {
@@ -97,13 +107,18 @@ export default function SalesPeriodicPage() {
     }, []);
 
     /* ── Fetch sales analysis ───────────────────────────── */
-    const fetchSales = useCallback(async (page = 1, isBackground = false) => {
+    const fetchSales = useCallback(async (isBackground = false) => {
         if (!isBackground) {
             setLoading(true);
             setError("");
-            if (page === 1) {
-                setSalesData([]);
-                setMonths([]);
+            setAllSalesData([]);
+            setSalesData([]);
+            setMonths([]);
+            setCurrentPage(1);
+
+            // Scroll to top of table/toolbar for better context
+            if (typeof window !== "undefined") {
+                window.scrollTo({ top: 0, behavior: 'smooth' });
             }
         }
         try {
@@ -111,10 +126,8 @@ export default function SalesPeriodicPage() {
                 branch: selectedBranch,
                 month: targetMonth.toString(),
                 year: targetYear.toString(),
-                page: page.toString(),
-                pageSize: "15"
             });
-            const cacheKey = `sales_periodic_${params.toString()}`;
+            const cacheKey = `sales_periodic_all_${params.toString()}`;
 
             const res = await fetch(`/api/sales-periodic?${params.toString()}`);
             if (res.status === 401) { router.push("/signin"); return; }
@@ -123,9 +136,9 @@ export default function SalesPeriodicPage() {
                 return;
             }
             const result = await res.json();
-            setSalesData(result.data || []);
+            setAllSalesData(result.data || []);
             setMonths(result.months || []);
-            setPagination(result.pagination || { page: 1, pageSize: 15, totalItems: 0, totalPages: 0 });
+            setPagination(result.pagination || { totalItems: 0, totalPages: 0 });
             setMetrics(result.metrics || { overallStocks: 0, totalRevenue: 0, uniqueProducts: 0, totalQtySold: 0 });
             DataCache.set(cacheKey, result);
         } catch {
@@ -142,10 +155,10 @@ export default function SalesPeriodicPage() {
             month: targetMonth.toString(),
             year: targetYear.toString()
         });
-        const cacheKey = `sales_periodic_${params.toString()}`;
+        const cacheKey = `sales_periodic_all_${params.toString()}`;
         const cached = DataCache.get(cacheKey);
         if (cached) {
-            setSalesData(cached.data || []);
+            setAllSalesData(cached.data || []);
             setMonths(cached.months || []);
             if (cached.pagination) setPagination(cached.pagination);
             if (cached.metrics) setMetrics(cached.metrics);
@@ -162,7 +175,7 @@ export default function SalesPeriodicPage() {
         headers.push("Total Qty");
         headers.push("Total Sales");
 
-        const rows = salesData.map((r) => {
+        const rows = allSalesData.map((r) => {
             const row = [r.inventoryId, r.branchName, r.description];
             months.forEach(m => {
                 row.push(r.monthlyData[m.key]?.qty || 0);
@@ -181,7 +194,7 @@ export default function SalesPeriodicPage() {
         a.download = `sales-periodic-${selectedBranch || "all"}-${targetMonth}-${targetYear}.csv`;
         a.click();
         URL.revokeObjectURL(url);
-    }, [salesData, selectedBranch, targetMonth, targetYear, months]);
+    }, [allSalesData, selectedBranch, targetMonth, targetYear, months]);
 
     return (
         <div className="db-root">
@@ -192,7 +205,7 @@ export default function SalesPeriodicPage() {
                             <h1>Product Periodic Sales</h1>
                             <p>3-Month Comparative Sales Analysis based on Target Month. Fetched live from Acumatica.</p>
                         </div>
-                        <button className="db-action-btn" onClick={exportCSV} disabled={salesData.length === 0}>
+                        <button className="db-action-btn" onClick={exportCSV} disabled={allSalesData.length === 0}>
                             <DownloadIcon /> Export CSV
                         </button>
                     </div>
@@ -201,12 +214,12 @@ export default function SalesPeriodicPage() {
                 <div className="db-stats">
                     <div className="db-stat-card db-stat-blue">
                         <span className="db-stat-label">3M Total Volume</span>
-                        <span className="db-stat-value">{salesData.length > 0 ? metrics.totalQtySold.toLocaleString() : "—"}</span>
+                        <span className="db-stat-value">{allSalesData.length > 0 ? metrics.totalQtySold.toLocaleString() : "—"}</span>
                         <span className="db-stat-sub">Units Sold</span>
                     </div>
                     <div className="db-stat-card">
                         <span className="db-stat-label">3M Total Revenue</span>
-                        <span className="db-stat-value">{salesData.length > 0 ? `₱${metrics.totalRevenue.toLocaleString(undefined, { minimumFractionDigits: 0 })}` : "—"}</span>
+                        <span className="db-stat-value">{allSalesData.length > 0 ? `₱${metrics.totalRevenue.toLocaleString(undefined, { minimumFractionDigits: 0 })}` : "—"}</span>
                         <span className="db-stat-sub">Gross Sales</span>
                     </div>
                     <div className="db-stat-card">
@@ -273,7 +286,7 @@ export default function SalesPeriodicPage() {
                         <button
                             type="button"
                             className="db-btn-run-analysis"
-                            onClick={() => fetchSales(1)}
+                            onClick={() => fetchSales()}
                             disabled={loading}
                             style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px', minWidth: '160px' }}
                         >
@@ -285,7 +298,7 @@ export default function SalesPeriodicPage() {
 
                 {error && <div className="db-error-card"><div className="db-error-body"><div className="db-error-title">Error</div><div className="db-error-msg">{error}</div></div></div>}
 
-                {loading && salesData.length === 0 ? (
+                {loading && allSalesData.length === 0 ? (
                     <div className="db-loading">
                         <div className="db-spinner db-spinner-lg"></div>
                         <p>Fetching real-time data from Acumatica (This may take 1-2 minutes)...</p>
@@ -349,23 +362,32 @@ export default function SalesPeriodicPage() {
                             </table>
                         </div>
 
-                        {salesData.length > 0 && pagination.totalPages > 1 && (
-                            <div className="si-pagination" style={{ marginTop: '20px' }}>
-                                <span className="si-page-info">Page {pagination.page} of {pagination.totalPages}</span>
-                                <div className="si-page-buttons">
+                        {allSalesData.length > 0 && pagination.totalPages > 1 && (
+                            <div className="db-pagination">
+                                <span className="db-page-info">
+                                    Showing <strong>{((currentPage - 1) * pageSize) + 1}</strong> to <strong>{Math.min(currentPage * pageSize, pagination.totalItems)}</strong> of <strong>{pagination.totalItems}</strong> unique products
+                                </span>
+                                <div className="db-page-btns">
                                     <button 
-                                        className="si-page-btn" 
-                                        onClick={() => fetchSales(pagination.page - 1)} 
-                                        disabled={pagination.page === 1}
+                                        className="db-page-btn" 
+                                        onClick={() => setCurrentPage(p => Math.max(1, p - 1))} 
+                                        disabled={currentPage === 1}
+                                        title="Previous Page"
                                     >
-                                        <IconChevronLeft /> Prev
+                                        <IconChevronLeft />
                                     </button>
+                                    
+                                    <span className="db-page-dots" style={{ minWidth: '100px' }}>
+                                        Page {currentPage} of {pagination.totalPages}
+                                    </span>
+
                                     <button 
-                                        className="si-page-btn" 
-                                        onClick={() => fetchSales(pagination.page + 1)} 
-                                        disabled={pagination.page === pagination.totalPages}
+                                        className="db-page-btn" 
+                                        onClick={() => setCurrentPage(p => Math.min(pagination.totalPages, p + 1))} 
+                                        disabled={currentPage === pagination.totalPages}
+                                        title="Next Page"
                                     >
-                                        Next <IconChevronRight />
+                                        <IconChevronRight />
                                     </button>
                                 </div>
                             </div>

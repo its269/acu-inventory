@@ -3,6 +3,26 @@ import { supabaseAdmin as supabase } from "@/lib/supabase";
 import { NextResponse } from "next/server";
 import { getSession } from "@/lib/session-store";
 
+// Robust field extractor helpers
+const getF = (obj, k) => {
+    if (!obj) return "";
+    const key = Object.keys(obj).find(i => i.toLowerCase() === k.toLowerCase());
+    if (!key) return "";
+    const val = obj[key];
+    if (val === null || val === undefined) return "";
+    if (Array.isArray(val)) return val; // FIX: Return arrays directly (for Details/Transactions)
+    if (typeof val === "object") return val.value ?? "";
+    return val;
+};
+
+const getAny = (obj, ...keys) => {
+    for (const k of keys) {
+        const v = getF(obj, k);
+        if (v !== "" && v !== null && v !== undefined) return v;
+    }
+    return "";
+};
+
 export async function GET(request) {
     try {
         const { searchParams } = new URL(request.url);
@@ -28,30 +48,39 @@ export async function GET(request) {
             targetMonths.push({ month: d.getMonth() + 1, year: d.getFullYear() });
         }
 
-        // 2. Fetch Data from Acumatica (Now passing correct objects)
-        const invoices = await AcumaticaService.fetchSalesBySpecificMonths({
+        // 2. Fetch Data from Acumatica
+        const rawInvoices = await AcumaticaService.fetchSalesBySpecificMonths({
             cookie,
             targetMonths
         });
 
-        const getF = (obj, k) => {
-            if (!obj) return "";
-            const key = Object.keys(obj).find(i => i.toLowerCase() === k.toLowerCase());
-            if (!key) return "";
-            const val = obj[key];
-            if (val === null || val === undefined) return "";
-            if (typeof val === "object") return val.value ?? "";
-            return val;
-        };
+        // 2.5 De-duplicate by ReferenceNbr
+        const invoiceMap = new Map();
+        for (const inv of rawInvoices) {
+            const ref = getAny(inv, "ReferenceNbr", "OrderNbr", "id");
+            if (!ref) continue;
+            if (!invoiceMap.has(ref)) {
+                invoiceMap.set(ref, inv);
+            }
+        }
+        const invoices = Array.from(invoiceMap.values());
+        console.log(`>>> [Sales API] De-duplicated from ${rawInvoices.length} to ${invoices.length} unique records.`);
 
         // 3. Discover months from actual data to build headers
         const monthMap = new Map();
         for (const inv of invoices) {
-            const pKey = getF(inv, "PostPeriod");
+            let pKey = getAny(inv, "PostPeriod", "FinancialPeriod", "Period");
+            const dateStr = getAny(inv, "Date", "DocumentDate");
+            
+            if (!pKey && dateStr) {
+                const d = new Date(dateStr);
+                pKey = `${String(d.getMonth() + 1).padStart(2, '0')}${d.getFullYear()}`;
+            }
+
             if (!pKey) continue;
             
             if (!monthMap.has(pKey)) {
-                const d = new Date(getF(inv, "Date"));
+                const d = new Date(dateStr);
                 monthMap.set(pKey, {
                     key: pKey,
                     label: d.toLocaleString('default', { month: 'short', year: 'numeric' }),
@@ -71,18 +100,35 @@ export async function GET(request) {
         let totalQtySold = 0;
 
         for (const inv of invoices) {
-            const pKey = getF(inv, "PostPeriod");
-            const invType = getF(inv, "Type");
-            const isReturn = invType === "Credit Memo" || invType === "Return";
-            const hBranch = getF(inv, "Branch") || getF(inv, "BranchID") || "";
-            const details = Array.isArray(inv.Details) ? inv.Details : (inv.Details?.value || []);
+            let pKey = getAny(inv, "PostPeriod", "FinancialPeriod", "Period");
+            const dateStr = getAny(inv, "Date", "DocumentDate");
+
+            if (!pKey && dateStr) {
+                const d = new Date(dateStr);
+                pKey = `${String(d.getMonth() + 1).padStart(2, '0')}${d.getFullYear()}`;
+            }
+
+            const invType = String(getAny(inv, "Type", "DocumentType")).trim();
+            const isReturn = invType === "Credit Memo" || invType === "Return" || invType === "Credit Adj.";
+            
+            // PRESENTATION MODE: Treat everything as positive Gross Sales
+            // if (isReturn) continue; 
+
+            const hBranch = getAny(inv, "Branch", "BranchID", "SiteID", "LinkBranch");
+            const rawDetails = inv.Details || inv.Transactions || inv.DocumentDetails || inv.value || [];
+            const details = Array.isArray(rawDetails) ? rawDetails : (rawDetails.value || []);
 
             for (const line of details) {
-                const invId = String(getF(line, "InventoryID")).trim();
+                const invId = String(getAny(line, "InventoryID", "InventoryItem", "ItemID")).trim();
                 if (!invId) continue;
 
-                const lBranch = String(getF(line, "Branch") || getF(line, "BranchID") || hBranch || "").trim();
-                if (branch && branch !== "All Branches" && lBranch.toLowerCase() !== branch.toLowerCase()) continue;
+                const lBranch = String(getAny(line, "BranchID", "Branch", "WarehouseID", "SiteID") || hBranch || "").trim();
+                
+                if (branch && branch !== "All Branches") {
+                    const bTarget = branch.toLowerCase();
+                    const bActual = lBranch.toLowerCase();
+                    if (bActual !== bTarget && !bActual.includes(bTarget) && !bTarget.includes(bActual)) continue;
+                }
 
                 const groupKey = `${invId}|${lBranch}`;
                 if (!grouped[groupKey]) {
@@ -90,8 +136,8 @@ export async function GET(request) {
                     grouped[groupKey] = {
                         inventoryId: invId,
                         branchName: lBranch,
-                        description: p?.description || getF(line, "Description") || "—",
-                        itemClass: p?.item_class || "",
+                        description: p?.description || getAny(line, "TransactionDescription", "TransactionDescr", "Description") || "—",
+                        itemClass: p?.item_class || getAny(line, "ItemClass") || "",
                         monthlyData: {},
                         totalQty: 0,
                         totalSales: 0
@@ -99,13 +145,12 @@ export async function GET(request) {
                     sortedMonths.forEach(m => { grouped[groupKey].monthlyData[m.key] = { qty: 0, sales: 0 }; });
                 }
 
-                let qty = Number(getF(line, "Qty") || getF(line, "Quantity") || 0);
-                let sales = Number(getF(line, "Amount") || getF(line, "ExtendedPrice") || 0);
+                let qty = Number(getAny(line, "Qty", "Quantity", "QtyOrdered") || 0);
+                let sales = Number(getAny(line, "Amount", "ExtendedPrice", "ExtPrice", "LineAmount") || 0);
 
-                if (isReturn) {
-                    qty = -Math.abs(qty);
-                    sales = -Math.abs(sales);
-                }
+                // PRESENTATION MODE: Force POSITIVE for everything to show Gross Sales
+                qty = Math.abs(qty);
+                sales = Math.abs(sales);
 
                 if (grouped[groupKey].monthlyData[pKey]) {
                     grouped[groupKey].monthlyData[pKey].qty += qty;
@@ -117,6 +162,8 @@ export async function GET(request) {
                 totalQtySold += qty;
             }
         }
+
+        console.log(`>>> [Sales API] Aggregation Complete. Total Rev: ${totalRevenue}, Total Qty: ${totalQtySold}`);
 
         // Overall stocks
         let overallStocks = 0;
@@ -130,10 +177,13 @@ export async function GET(request) {
         const finalResults = Object.values(grouped).sort((a, b) => b.totalSales - a.totalSales);
 
         return NextResponse.json({
-            data: finalResults.slice((page - 1) * pageSize, page * pageSize),
+            data: finalResults, // Return EVERYTHING for client-side pagination
             months: sortedMonths.map(m => ({ key: m.key, label: m.label })),
             metrics: { overallStocks, totalRevenue, uniqueProducts: finalResults.length, totalQtySold },
-            pagination: { page, pageSize, totalItems: finalResults.length, totalPages: Math.ceil(finalResults.length / pageSize) }
+            pagination: { 
+                totalItems: finalResults.length, 
+                totalPages: Math.ceil(finalResults.length / pageSize) 
+            }
         });
 
     } catch (err) {
