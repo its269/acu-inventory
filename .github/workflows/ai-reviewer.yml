@@ -16,16 +16,10 @@ jobs:
       - name: Checkout Code
         uses: actions/checkout@v4
 
-      # Ito ang step na tatawag sa Gemini para mag-review
-      - name: Gemini Code Review
-        uses: google-gemini/gemini-github-action@v1
+      # Ito ang tamang action para kay Gemini
+      - name: Run Gemini Review
+        uses: google-github-actions/run-gemini-cli@v0.1
         with:
-          gemini_api_key: ${{ secrets.GEMINI_API_KEY }}
-          github_token: ${{ secrets.GITHUB_TOKEN }}
-          prompt: |
-            You are an AI Code Reviewer. Review the following PR changes.
-            Focus on:
-            - Security (Acumatica credentials)
-            - Next.js Streaming BFF patterns
-            - Vanilla CSS modularity
-            Please provide comments on specific lines if possible.
+          args: review --files .
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
