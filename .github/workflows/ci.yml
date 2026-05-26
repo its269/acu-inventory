@@ -27,10 +27,10 @@ jobs:
       - name: Next.js Build
         run: npm run build
         env:
-          # Ilagay dito ang dummy envs kung kailangan ng build
           NEXT_PUBLIC_ACUMATICA_URL: "https://mock.acumatica.com"
 
-  # Job 2: Check if all conversations (including AI) are resolved
+  # Job 2: Check if all conversations (including AI assistance) are resolved
+  # Ito yung logic na galing sa BorrowHub mo
   check-review-resolution:
     if: github.event_name != 'push'
     runs-on: ubuntu-latest
@@ -46,7 +46,6 @@ jobs:
           
           echo "Checking PR #$PR_NUMBER for unresolved review conversations..."
           
-          # GraphQL query para sa resolution check
           UNRESOLVED_COUNT=$(gh api graphql -F owner="${{ github.repository_owner }}" -F repo="${{ github.event.repository.name }}" -F pr="$PR_NUMBER" -f query='
             query($owner:String!, $repo:String!, $pr:Int!) {
               repository(owner:$owner, name:$repo) {
@@ -62,7 +61,7 @@ jobs:
           
           if [ "$UNRESOLVED_COUNT" -gt 0 ]; then
             echo "Error: There are $UNRESOLVED_COUNT unresolved review threads."
-            echo "All conversations (including those from AI assist) must be resolved before merging."
+            echo "All conversations (including from gemini-code-assist) must be resolved before merging."
             exit 1
           fi
           echo "All review conversations are resolved."
@@ -82,7 +81,7 @@ jobs:
           
           if [[ "${{ github.event_name }}" != "push" ]]; then
             if [[ "${{ needs.check-review-resolution.result }}" == "failure" || "${{ needs.check-review-resolution.result }}" == "cancelled" ]]; then
-              echo "Review resolution check failed. Please resolve all conversations."
+              echo "Review resolution check failed. Please resolve all conversations (including from AI)."
               exit 1
             fi
           fi
