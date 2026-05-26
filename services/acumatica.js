@@ -34,6 +34,136 @@ export const AcumaticaService = {
         return (data.value || []).map(w => ({ SiteID: w.WarehouseID?.value || w.WarehouseID })).sort((a, b) => a.SiteID.localeCompare(b.SiteID));
     },
 
+    async getRealBranches(cookie) {
+        const url = `${ACU_BASE}/Branch?$select=BranchID,Description`;
+        const res = await this.fetchWithRetry(url, cookie);
+        const data = await res.json();
+        const raw = data.value || (Array.isArray(data) ? data : []);
+        return raw.map(b => ({
+            BranchID: getF(b, "BranchID"),
+            Description: getF(b, "Description")
+        }));
+    },
+
+    async getStockItems({ page = 1, pageSize = 50, search = "", branch = "", cookie, includeStats = false, includeCount = false }) {
+        const skip = (page - 1) * pageSize;
+        const top = pageSize;
+
+        let filterArr = [];
+        if (search) {
+            filterArr.push(`(contains(InventoryID, '${search}') or contains(Description, '${search}'))`);
+        }
+        
+        let url = `${ACU_BASE}/StockItem?$expand=WarehouseDetails&$top=${top}&$skip=${skip}`;
+        if (filterArr.length > 0) {
+            url += `&$filter=${filterArr.join(" and ")}`;
+        }
+
+        const res = await this.fetchWithRetry(url, cookie);
+        const data = await res.json();
+        const items = data.value || [];
+
+        let flattened = [];
+        for (const item of items) {
+            const wds = item.WarehouseDetails || [];
+            if (wds.length === 0) {
+                 if (!branch) {
+                     flattened.push({
+                         InventoryID: { value: getF(item, "InventoryID") },
+                         Description: { value: getF(item, "Description") },
+                         Branch: { value: "—" },
+                         SiteID: { value: "—" },
+                         OnHand: { value: 0 },
+                         Available: { value: 0 },
+                         DefaultPrice: { value: parseFloat(getF(item, "DefaultPrice") || 0) },
+                         ItemClass: { value: getF(item, "ItemClass") },
+                     });
+                 }
+                 continue;
+            }
+            for (const wh of wds) {
+                const whId = getF(wh, "WarehouseID");
+                if (branch && whId.toLowerCase() !== branch.toLowerCase()) continue;
+
+                flattened.push({
+                    InventoryID: { value: getF(item, "InventoryID") },
+                    Description: { value: getF(item, "Description") },
+                    Branch: { value: whId },
+                    SiteID: { value: whId },
+                    OnHand: { value: parseFloat(getF(wh, "QtyOnHand") || 0) },
+                    Available: { value: parseFloat(getF(wh, "QtyAvailable") || 0) },
+                    DefaultPrice: { value: parseFloat(getF(item, "DefaultPrice") || 0) },
+                    ItemClass: { value: getF(item, "ItemClass") },
+                });
+            }
+        }
+        
+        return {
+            data: flattened,
+            totalCount: flattened.length,
+            hasMore: items.length === pageSize
+        };
+    },
+
+    async getSalesAnalysis({ branch, cookie, startDate, endDate }) {
+        let filterArr = [];
+        if (startDate) filterArr.push(`Date ge datetimeoffset'${startDate}T00:00:00Z'`);
+        if (endDate) filterArr.push(`Date le datetimeoffset'${endDate}T23:59:59Z'`);
+        if (branch) filterArr.push(`Branch eq '${branch}'`);
+
+        const filter = filterArr.length > 0 ? `&$filter=${filterArr.join(" and ")}` : "";
+        const url = `${ACU_BASE}/SalesInvoice?$expand=Details&$top=1000${filter}`;
+
+        const res = await this.fetchWithRetry(url, cookie);
+        const data = await res.json();
+        return data.value || [];
+    },
+
+    /** ── PURCHASE ORDERS ── */
+    async getPurchaseOrders({ page = 1, pageSize = 50, search = "", cookie, startDate = "", status = "" }) {
+        const skip = (page - 1) * pageSize;
+        const top = pageSize + 1;
+
+        let filterArr = [];
+        if (search) {
+            filterArr.push(`contains(OrderNbr, '${search}')`);
+        }
+        if (status) {
+            filterArr.push(`Status eq '${status}'`);
+        }
+        if (startDate) {
+            filterArr.push(`Date ge datetimeoffset'${startDate}T00:00:00Z'`);
+        }
+
+        const filter = filterArr.length > 0 ? `&$filter=${filterArr.join(" and ")}` : "";
+        const url = `${ACU_BASE}/PurchaseOrder?$expand=Details&$top=${top}&$skip=${skip}${filter}&$orderby=Date desc,OrderNbr desc`;
+
+        console.log(`>>> [Acumatica] Fetching PO: ${url}`);
+        const res = await this.fetchWithRetry(url, cookie);
+        const data = await res.json();
+        const rawOrders = data.value || (Array.isArray(data) ? data : []);
+
+        const hasMore = rawOrders.length > pageSize;
+        const orders = rawOrders.slice(0, pageSize).map(po => ({
+            orderNbr: getF(po, "OrderNbr"),
+            orderType: getF(po, "OrderType"),
+            status: getF(po, "Status"),
+            date: getF(po, "Date"),
+            vendorId: getF(po, "VendorID"),
+            vendorName: getF(po, "VendorName"),
+            totalAmount: parseFloat(getF(po, "OrderTotal") || 0),
+            lines: (po.Details || []).map(line => ({
+                inventoryId: getF(line, "InventoryID"),
+                description: getF(line, "Description"),
+                qty: parseFloat(getF(line, "OrderQty") || 0),
+                uom: getF(line, "UOM"),
+                extCost: parseFloat(getF(line, "LineAmount") || 0)
+            }))
+        }));
+
+        return { orders, hasMore };
+    },
+
     /** ── SALES: Discover Periods and Fetch Data ── */
     async fetchSalesBySpecificMonths({ cookie, targetMonths }) {
         if (salesAbortController) salesAbortController.abort();

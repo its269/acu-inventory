@@ -107,11 +107,15 @@ export default function SignInPage() {
         <div className="signin-wrapper">
             <div className="signin-card">
                 <div className="signin-header">
-                    <div className="signin-logo">
-                        <IconLock />
+                    <div className="signin-logo-container">
+                        <img
+                            src="/KELIN%20LOGO-01.png"
+                            alt="Kelin Logo"
+                            className="signin-logo-img"
+                        />
                     </div>
-                    <h1 className="signin-title">Sign In</h1>
-                    <p className="signin-subtitle">Enter your credentials to continue</p>
+                    <h1 className="signin-title">KGS PURCHASING</h1>
+                    <p className="signin-subtitle">Please enter your account details</p>
                 </div>
 
                 <form className="signin-form" onSubmit={handleSubmit} noValidate>
@@ -132,7 +136,7 @@ export default function SignInPage() {
                                 id="username"
                                 className="signin-input"
                                 type="text"
-                                placeholder="Enter your username"
+                                placeholder="Username"
                                 value={username}
                                 onChange={(e) => setUsername(e.target.value)}
                                 autoComplete="username"
@@ -152,7 +156,7 @@ export default function SignInPage() {
                                 id="password"
                                 className="signin-input"
                                 type={showPassword ? "text" : "password"}
-                                placeholder="Enter your password"
+                                placeholder="Password"
                                 value={password}
                                 onChange={(e) => setPassword(e.target.value)}
                                 autoComplete="current-password"
@@ -171,21 +175,30 @@ export default function SignInPage() {
                         </div>
                     </div>
 
-                    <div className="signin-remember">
-                        <input
-                            id="remember"
-                            className="signin-checkbox"
-                            type="checkbox"
-                        />
-                        <label htmlFor="remember" className="signin-remember-label">
-                            Keep me signed in
-                        </label>
+                    <div className="signin-options">
+                        <div className="signin-remember">
+                            <input
+                                id="remember"
+                                className="signin-checkbox"
+                                type="checkbox"
+                            />
+                            <label htmlFor="remember" className="signin-remember-label">
+                                Remember me
+                            </label>
+                        </div>
+                        <button type="button" className="signin-forgot-btn" onClick={() => alert("Please contact your administrator to reset your password.")}>
+                            Forgot password?
+                        </button>
                     </div>
 
                     <button type="submit" className="signin-btn" disabled={loading} suppressHydrationWarning>
                         {loading ? <span className="signin-spinner" /> : "Sign In"}
                     </button>
                 </form>
+
+                <div className="signin-footer">
+                    <p>&copy; {new Date().getFullYear()} Kelin Graphics System Corp.</p>
+                </div>
             </div>
         </div>
     );

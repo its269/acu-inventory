@@ -118,20 +118,29 @@ export default function InventoryDetailModal({ inventoryId, onClose }) {
                                 <span className="idm-card-label">Total On Hand</span>
                                 <div className="idm-card-value-group">
                                     <span className="idm-card-value">{Number(detail.totalOnHand).toLocaleString()}</span>
-                                    <span className={`idm-status-pill ${totalStatus.cls}`}>{totalStatus.label}</span>
+                                    {totalStatus && (
+                                        <span className={`idm-status-pill ${totalStatus.cls}`}>{totalStatus.label}</span>
+                                    )}
                                 </div>
                             </div>
                             <div className="idm-card">
                                 <span className="idm-card-label">Total Available</span>
-                                <span className="idm-card-value">{Number(detail.totalAvailable).toLocaleString()}</span>
+                                <div className="idm-card-value-group">
+                                    <span className="idm-card-value">{Number(detail.totalAvailable).toLocaleString()}</span>
+                                    <span className="idm-card-label" style={{ fontSize: '0.6rem', color: '#94a3b8' }}>Units</span>
+                                </div>
                             </div>
                             <div className="idm-card">
                                 <span className="idm-card-label">Unit Price</span>
-                                <span className="idm-card-value">₱{Number(detail.unitPrice).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                                <div className="idm-card-value-group">
+                                    <span className="idm-card-value">₱{Number(detail.unitPrice).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                                </div>
                             </div>
                             <div className="idm-card">
                                 <span className="idm-card-label">Base Unit</span>
-                                <span className="idm-card-value">{detail.baseUnit || "—"}</span>
+                                <div className="idm-card-value-group">
+                                    <span className="idm-card-value" style={{ fontSize: '1.25rem' }}>{detail.baseUnit || "—"}</span>
+                                </div>
                             </div>
                         </div>
 
@@ -155,7 +164,7 @@ export default function InventoryDetailModal({ inventoryId, onClose }) {
 
                         {/* Warehouse Breakdown */}
                         <div className="idm-section">
-                            <h3 className="idm-section-title">Qty. On Hand by Warehouse / Branch</h3>
+                            <h3 className="idm-section-title">Stock by Warehouse / Branch</h3>
                             <div className="idm-table-container">
                                 <table className="idm-table">
                                     <thead>
@@ -167,14 +176,14 @@ export default function InventoryDetailModal({ inventoryId, onClose }) {
                                         </tr>
                                     </thead>
                                     <tbody>
-                                        {detail.branches.length === 0 ? (
+                                        {detail.branches && detail.branches.length === 0 ? (
                                             <tr><td colSpan={4} className="idm-empty">No warehouse data available.</td></tr>
                                         ) : (
-                                            detail.branches.map(b => {
+                                            (detail.branches || []).map(b => {
                                                 const s = stockStatus(b.onHand);
                                                 return (
-                                                    <tr key={b.branchId}>
-                                                        <td><strong>{b.branchId}</strong></td>
+                                                    <tr key={b.branchId || b.siteId}>
+                                                        <td><strong>{b.branchId || b.siteId}</strong></td>
                                                         <td className="idm-txt-right idm-txt-bold">{Number(b.onHand).toLocaleString()}</td>
                                                         <td className="idm-txt-right">{Number(b.available).toLocaleString()}</td>
                                                         <td><span className={`idm-status-pill idm-status-pill-sm ${s.cls}`}>{s.label}</span></td>
