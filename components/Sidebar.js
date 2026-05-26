@@ -70,12 +70,17 @@ export default function Sidebar() {
     <>
       <button 
         className="sidebar-mobile-toggle" 
-        onClick={() => setIsOpen(!isOpen)}
+        onClick={() => setIsOpen(prev => !prev)}
         aria-label="Toggle Menu"
+        aria-expanded={isOpen}
+        aria-controls="main-sidebar"
       >
         <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
           {isOpen ? (
-            <line x1="18" y1="6" x2="6" y2="18" />
+            <>
+              <line x1="18" y1="6" x2="6" y2="18" />
+              <line x1="6" y1="6" x2="18" y2="18" />
+            </>
           ) : (
             <>
               <line x1="3" y1="12" x2="21" y2="12" /><line x1="3" y1="6" x2="21" y2="6" /><line x1="3" y1="18" x2="21" y2="18" />
@@ -84,9 +89,16 @@ export default function Sidebar() {
         </svg>
       </button>
 
-      {isOpen && <div className="sidebar-overlay" onClick={() => setIsOpen(false)} />}
+      {isOpen && (
+        <button 
+          className="sidebar-overlay" 
+          onClick={() => setIsOpen(false)} 
+          aria-label="Close Sidebar"
+          type="button"
+        />
+      )}
 
-      <aside className={`sidebar ${isOpen ? "open" : ""}`}>
+      <aside id="main-sidebar" className={`sidebar ${isOpen ? "open" : ""}`}>
         <div className="sidebar-header">
           <div className="sidebar-brand">
             <span className="sidebar-logo">
