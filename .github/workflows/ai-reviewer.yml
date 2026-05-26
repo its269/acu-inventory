@@ -16,11 +16,21 @@ jobs:
       - name: Checkout Code
         uses: actions/checkout@v4
 
-      # Sinisigurado na ang auth ay mapapasa sa action at sa CLI environment
-      - name: Run Gemini Review
-        uses: google-github-actions/run-gemini-cli@v0
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
         with:
-          gemini_api_key: ${{ secrets.GEMINI_API_KEY }}
-          prompt: "review --files ."
+          node-version: '20'
+
+      - name: Check Secret Presence
+        run: |
+          if [ -z "${{ secrets.GEMINI_API_KEY }}" ]; then
+            echo "❌ ERROR: GEMINI_API_KEY is empty or not found in Secrets."
+            exit 1
+          else
+            echo "✅ GEMINI_API_KEY is detected."
+          fi
+
+      - name: Run Gemini Review
+        run: npx -y @google/gemini-cli review --files .
         env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
