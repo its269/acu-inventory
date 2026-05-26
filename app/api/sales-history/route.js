@@ -1,9 +1,13 @@
 import { AcumaticaService } from "@/services/acumatica";
 import { NextResponse } from "next/server";
+import { getSession } from "@/lib/session-store";
 
 export async function GET(request) {
     try {
-        const cookie = request.headers.get("cookie") || "";
+        const sessionId = request.cookies.get("acu_session")?.value;
+        const cookie = getSession(sessionId);
+        if (!cookie) return NextResponse.json({ message: "Unauthorized" }, { status: 401 });
+
         const { searchParams } = new URL(request.url);
         
         const branch = searchParams.get("branch") || "";

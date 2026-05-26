@@ -1,6 +1,7 @@
 import { AcumaticaService } from "@/services/acumatica";
 import { supabase } from "@/lib/supabase";
 import { NextResponse } from "next/server";
+import { getSession } from "@/lib/session-store";
 
 export async function GET(request) {
     try {
@@ -21,7 +22,10 @@ export async function GET(request) {
             })));
         }
 
-        const cookie = request.headers.get("cookie") || "";
+        const sessionId = request.cookies.get("acu_session")?.value;
+        const cookie = getSession(sessionId);
+        if (!cookie) return NextResponse.json({ message: "Unauthorized" }, { status: 401 });
+
         const branches = await AcumaticaService.getBranches(cookie);
         return NextResponse.json(branches);
     } catch (err) {
