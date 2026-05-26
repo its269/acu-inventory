@@ -16,10 +16,9 @@ jobs:
       - name: Checkout Code
         uses: actions/checkout@v4
 
-      # Ginamit ang @v0 para makuha ang latest stable version
+      # Ginamit ang tamang inputs base sa action documentation
       - name: Run Gemini Review
         uses: google-github-actions/run-gemini-cli@v0
         with:
-          args: review --files .
-        env:
-          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          gemini_api_key: ${{ secrets.GEMINI_API_KEY }}
+          prompt: "review --files ."
