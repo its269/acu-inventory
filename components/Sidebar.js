@@ -68,8 +68,8 @@ export default function Sidebar() {
 
   return (
     <>
-      <button 
-        className="sidebar-mobile-toggle" 
+      <button
+        className="sidebar-mobile-toggle"
         onClick={() => setIsOpen(prev => !prev)}
         aria-label="Toggle Menu"
         aria-expanded={isOpen}
@@ -90,9 +90,9 @@ export default function Sidebar() {
       </button>
 
       {isOpen && (
-        <button 
-          className="sidebar-overlay" 
-          onClick={() => setIsOpen(false)} 
+        <button
+          className="sidebar-overlay"
+          onClick={() => setIsOpen(false)}
           aria-label="Close Sidebar"
           type="button"
         />
@@ -105,7 +105,7 @@ export default function Sidebar() {
               {/* <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
                 <path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5" />
               </svg> */}
-              <img src="/KELIN LOGO-01.png" alt="KGS Logo" style={{ width: '38px', marginLeft: '4px' }} />
+              <img src="/kelin-logo.png" alt="KGS Logo" style={{ width: '38px', marginLeft: '4px' }} />
             </span>
             KGS PURCHASING
           </div>
