@@ -1,13 +1,28 @@
 "use client";
 
-import { Fragment, useState } from "react";
+import { Fragment, useState, useEffect, useCallback, useRef, useMemo } from "react";
+import { DataCache } from "@/lib/data-cache";
+import InventoryDetailModal from "@/components/InventoryDetailModal";
 import "@/styles/dashboard.css";
 import "@/styles/stock-items.css";
 import "@/styles/po.css";
 
+const PAGE_SIZE = 50;
+
+/* ── SVG Icons ─────────────────────────────────────────── */
 const IconSearch = () => (
     <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
         <circle cx="11" cy="11" r="8" /><line x1="21" y1="21" x2="16.65" y2="16.65" />
+    </svg>
+);
+const IconChevronLeft = () => (
+    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+        <polyline points="15 18 9 12 15 6" />
+    </svg>
+);
+const IconChevronRight = () => (
+    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+        <polyline points="9 18 15 12 9 6" />
     </svg>
 );
 const IconChevronDown = () => (
@@ -15,48 +30,235 @@ const IconChevronDown = () => (
         <polyline points="6 9 12 15 18 9" />
     </svg>
 );
+const IconCalendar = () => (
+    <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+        <rect x="3" y="4" width="18" height="18" rx="2" ry="2" /><line x1="16" y1="2" x2="16" y2="6" /><line x1="8" y1="2" x2="8" y2="6" /><line x1="3" y1="10" x2="21" y2="10" />
+    </svg>
+);
+const IconInfo = () => (
+    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+        <circle cx="12" cy="12" r="10" /><line x1="12" y1="16" x2="12" y2="12" /><line x1="12" y1="8" x2="12.01" y2="8" />
+    </svg>
+);
+const IconActivity = () => (
+    <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+        <polyline points="22 12 18 12 15 21 9 3 6 12 2 12" />
+    </svg>
+);
 
-// Static Placeholder Data
-const STATIC_ORDERS = [
-    { orderNbr: "PO000123", orderType: "Normal", vendorName: "ABC Supplier", vendorId: "VEND001", status: "Open", date: "2026-05-20", totalAmount: 15000.50 },
-    { orderNbr: "PO000124", orderType: "Normal", vendorName: "XYZ Trading", vendorId: "VEND002", status: "Closed", date: "2026-05-21", totalAmount: 8400.00 },
-    { orderNbr: "PO000125", orderType: "Normal", vendorName: "Keling Phils", vendorId: "VEND003", status: "Completed", date: "2026-05-22", totalAmount: 22100.75 },
-];
+function poStatusClass(status) {
+    const s = (status || "").toLowerCase();
+    if (s === "open") return "po-status-open";
+    if (s === "closed") return "po-status-closed";
+    if (s === "completed") return "po-status-completed";
+    if (s === "cancelled" || s === "canceled") return "po-status-cancelled";
+    return "po-status-default";
+}
 
 function fmt(n) { return Number(n || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }); }
 function fmtDate(d) {
     if (!d) return "—";
     const date = new Date(d);
+    if (isNaN(date.getTime())) return d;
     return date.toLocaleDateString("en-PH", { year: "numeric", month: "short", day: "numeric" });
 }
 
 export default function PurchaseOrdersPage() {
-    const [expanded, setExpanded] = useState({});
+    const [orders, setOrders] = useState([]);
+    const [page, setPage] = useState(() => {
+        if (typeof window !== "undefined") {
+            const stored = localStorage.getItem("po_filter_page");
+            return stored ? parseInt(stored) : 1;
+        }
+        return 1;
+    });
+    const [hasMore, setHasMore] = useState(false);
+    const [search, setSearch] = useState(() => {
+        if (typeof window !== "undefined") return localStorage.getItem("po_filter_search") || "";
+        return "";
+    });
+    const [debSearch, setDebSearch] = useState("");
+    const [startDate, setStartDate] = useState(() => {
+        if (typeof window !== "undefined") return localStorage.getItem("po_filter_startDate") || "";
+        return "";
+    });
+    const [status, setStatus] = useState(() => {
+        if (typeof window !== "undefined") return localStorage.getItem("po_filter_status") || "Open";
+        return "Open";
+    });
+    const [loading, setLoading] = useState(true);
+    const [error, setError] = useState(null);
+    const [expanded, setExpanded] = useState({}); // orderNbr -> bool
+    const [selectedId, setSelectedId] = useState(null);
+    const [userInputs, setUserInputs] = useState({}); // key -> { eta, userStatus }
+
+    const isInitialMount = useRef(true);
+
+    // Load user inputs from localStorage
+    useEffect(() => {
+        const saved = localStorage.getItem("po_user_inputs");
+        if (saved) {
+            try {
+                const parsed = JSON.parse(saved);
+                setTimeout(() => setUserInputs(parsed), 0);
+            } catch (e) {
+                console.error("Failed to parse po_user_inputs", e);
+            }
+        }
+    }, []);
+
+    // Save user inputs to localStorage
+    useEffect(() => {
+        if (!isInitialMount.current) {
+            localStorage.setItem("po_user_inputs", JSON.stringify(userInputs));
+        }
+    }, [userInputs]);
+
+    const handleUserInput = (key, field, value) => {
+        setUserInputs(prev => ({
+            ...prev,
+            [key]: { ...(prev[key] || {}), [field]: value }
+        }));
+    };
+
+    // Save filters to localStorage
+    useEffect(() => {
+        localStorage.setItem("po_filter_page", page.toString());
+        localStorage.setItem("po_filter_search", search);
+        localStorage.setItem("po_filter_startDate", startDate);
+        localStorage.setItem("po_filter_status", status);
+    }, [page, search, startDate, status]);
+
+    useEffect(() => {
+        const t = setTimeout(() => setDebSearch(search), 350);
+        return () => clearTimeout(t);
+    }, [search]);
+
+    useEffect(() => {
+        if (isInitialMount.current) {
+            isInitialMount.current = false;
+            return;
+        }
+        setPage(1);
+    }, [debSearch, startDate, status]);
+
+    const fetchOrders = useCallback(async (isBackground = false) => {
+        if (!isBackground) setLoading(true);
+        setError(null);
+        try {
+            const params = new URLSearchParams({
+                page: String(page),
+                pageSize: String(PAGE_SIZE),
+                startDate: startDate,
+                status: status
+            });
+            if (debSearch) params.set("search", debSearch);
+            const cacheKey = `po_orders_${params.toString()}`;
+
+            const res = await fetch(`/api/po?${params}`); 
+            if (!res.ok) {
+                const body = await res.json().catch(() => ({}));
+                if (!isBackground) throw new Error(body.message || `HTTP ${res.status}`);
+                return;
+            }
+            const data = await res.json();
+            setOrders(data.orders ?? []);
+            setHasMore(data.hasMore ?? false);
+            DataCache.set(cacheKey, data);
+        } catch (err) {
+            if (!isBackground) setError(err.message || "Failed to load purchase orders.");
+        } finally {
+            setLoading(false);
+        }
+    }, [page, debSearch, startDate, status]);
+
+    useEffect(() => {
+        const params = new URLSearchParams({
+            page: String(page),
+            pageSize: String(PAGE_SIZE),
+            startDate: startDate,
+            status: status
+        });
+        if (debSearch) params.set("search", debSearch);
+        const cacheKey = `po_orders_${params.toString()}`;
+
+        const cached = DataCache.get(cacheKey);
+        if (cached) {
+            setTimeout(() => {
+                setOrders(cached.orders ?? []);
+                setHasMore(cached.hasMore ?? false);
+                setLoading(false);
+                fetchOrders(true);
+            }, 0);
+        } else {
+            setTimeout(() => fetchOrders(false), 0);
+        }
+    }, [fetchOrders, page, debSearch, startDate, status]);
 
     const toggleExpand = (key) => setExpanded(prev => ({ ...prev, [key]: !prev[key] }));
 
+    const summaryStats = useMemo(() => {
+        const totalValue = orders.reduce((sum, o) => sum + (Number(o.totalAmount) || 0), 0);
+        const pendingEtaCount = orders.filter(o => !userInputs[`${o.orderType}-${o.orderNbr}`]?.eta).length;
+        const openCount = orders.filter(o => o.status === 'Open').length;
+        return { totalValue, pendingEtaCount, openCount };
+    }, [orders, userInputs]);
+
     return (
-        <div className="db-root">
-            <main className="db-main">
+        <div className="db-root" style={{ display: 'flex', gap: '2rem', alignItems: 'flex-start', padding: '2rem' }}>
+            <main className="db-main" style={{ flex: 1, minWidth: 0, padding: 0, margin: 0, maxWidth: 'none' }}>
                 <div className="db-page-title">
                     <h1>Purchase Orders</h1>
-                    <p>Module Preview: View and manage all purchase orders (Static Placeholder).</p>
+                    <p>View and manage all purchase orders live from Acumatica ERP.</p>
                 </div>
 
-                <div className="db-toolbar" style={{ height: 'auto', padding: '1.25rem' }}>
+                <div className="db-toolbar" style={{ padding: '1.25rem' }}>
                     <div className="db-toolbar-left" style={{ flexWrap: 'wrap', gap: '1rem' }}>
+                        <div className="db-select-wrapper" style={{ paddingLeft: '0.75rem', paddingRight: '0.5rem', minWidth: 'fit-content', height: '42px' }}>
+                            <span style={{ fontSize: '0.75rem', fontWeight: '700', color: '#64748b', marginRight: '0.5rem', textTransform: 'uppercase' }}>From:</span>
+                            <input
+                                type="date"
+                                className="db-select"
+                                style={{ width: '135px', padding: '0 0.25rem', height: '36px', fontSize: '0.8rem' }}
+                                value={startDate}
+                                onChange={(e) => setStartDate(e.target.value)}
+                            />
+                        </div>
+
+                        <div className="db-select-wrapper" style={{ paddingLeft: '0.75rem', paddingRight: '0.5rem', minWidth: 'fit-content', height: '42px' }}>
+                            <span style={{ fontSize: '0.75rem', fontWeight: '700', color: '#64748b', marginRight: '0.5rem', textTransform: 'uppercase' }}>Status:</span>
+                            <select
+                                className="db-select"
+                                style={{ width: '140px', padding: '0 0.25rem', height: '36px', fontSize: '0.8rem' }}
+                                value={status}
+                                onChange={(e) => setStatus(e.target.value)}
+                            >
+                                <option value="">All Statuses</option>
+                                <option value="Hold">Hold</option>
+                                <option value="Open">Open</option>
+                                <option value="Balanced">Balanced</option>
+                                <option value="Pending Approval">Pending Approval</option>
+                                <option value="Completed">Completed</option>
+                                <option value="Cancelled">Cancelled</option>
+                                <option value="Closed">Closed</option>
+                            </select>
+                        </div>
+
                         <div className="db-search-wrapper" style={{ flex: '1', minWidth: '250px', height: '42px' }}>
                             <IconSearch />
                             <input
                                 className="db-search"
                                 type="text"
-                                placeholder="Search Order # (Static UI Only)..."
+                                placeholder="Search Order #, Vendor, or Item..."
                                 style={{ height: '40px', fontSize: '0.85rem' }}
-                                disabled
+                                value={search}
+                                onChange={e => setSearch(e.target.value)}
                             />
                         </div>
                     </div>
                 </div>
+
+                {error && <div className="si-error">{error}</div>}
 
                 <div className="db-table-wrap">
                     <table className="db-table po-table">
@@ -64,41 +266,104 @@ export default function PurchaseOrdersPage() {
                             <tr>
                                 <th style={{ width: 40 }}></th>
                                 <th style={{ width: 140 }}>Order #</th>
-                                <th>Type</th>
                                 <th>Vendor</th>
                                 <th style={{ width: 150 }}>Status</th>
                                 <th>Order Date</th>
+                                <th>ETA (Input)</th>
+                                <th>User Status</th>
                                 <th style={{ textAlign: "right" }}>Total Amount</th>
                             </tr>
                         </thead>
                         <tbody>
-                            {STATIC_ORDERS.map(po => {
-                                const key = po.orderNbr;
+                            {loading && orders.length === 0 ? (
+                                <tr><td colSpan={8} className="si-loading-cell">
+                                    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '1rem' }}>
+                                        <div className="db-spinner db-spinner-lg"></div>
+                                        <span>Fetching orders...</span>
+                                    </div>
+                                </td></tr>
+                            ) : orders.length === 0 ? (
+                                <tr><td colSpan={8} className="si-empty-cell">No purchase orders found.</td></tr>
+                            ) : orders.map(po => {
+                                const key = `${po.orderType}-${po.orderNbr}`;
                                 const isOpen = !!expanded[key];
+                                const ui = userInputs[key] || {};
                                 return (
                                     <Fragment key={key}>
-                                        <tr className="db-clickable-row" onClick={() => toggleExpand(key)}>
+                                        <tr className={`db-clickable-row ${isOpen ? "po-row-expanded" : ""}`} onClick={() => toggleExpand(key)}>
                                             <td>
-                                                <span className={`po-expand-icon ${isOpen ? "po-expand-open" : ""}`} style={{ color: '#94a3b8' }}>
+                                                <span className={`po-expand-icon ${isOpen ? "po-expand-open" : ""}`}>
                                                     <IconChevronDown />
                                                 </span>
                                             </td>
-                                            <td><span className="db-inv-id" style={{ background: '#eff6ff', borderColor: '#dbeafe' }}>{po.orderNbr}</span></td>
-                                            <td><span style={{ fontSize: '0.75rem', fontWeight: '600', color: '#64748b' }}>{po.orderType}</span></td>
+                                            <td><span className="db-inv-id">{po.orderNbr}</span></td>
                                             <td>
-                                                <div style={{ fontWeight: '700', color: '#0f172a', fontSize: '0.85rem' }}>{po.vendorName}</div>
-                                                <div style={{ fontSize: '0.7rem', color: '#94a3b8' }}>{po.vendorId}</div>
+                                                <div className="po-vendor">{po.vendorName || po.vendorId}</div>
+                                                <div className="po-vendor-name">{po.vendorId}</div>
                                             </td>
                                             <td>
-                                                <span className="db-status-badge po-status-open">{po.status}</span>
+                                                <span className={`db-status-badge ${poStatusClass(po.status)}`}>{po.status || "—"}</span>
                                             </td>
                                             <td><span style={{ fontSize: '0.8rem', color: '#475569' }}>{fmtDate(po.date)}</span></td>
+                                            <td onClick={(e) => e.stopPropagation()}>
+                                                <input 
+                                                    type="date" 
+                                                    className="po-input-date" 
+                                                    value={ui.eta || ""}
+                                                    onChange={(e) => handleUserInput(key, 'eta', e.target.value)}
+                                                />
+                                            </td>
+                                            <td onClick={(e) => e.stopPropagation()}>
+                                                <select 
+                                                    className="po-input-text" 
+                                                    style={{ width: '130px', cursor: 'pointer' }}
+                                                    value={ui.userStatus || ""}
+                                                    onChange={(e) => handleUserInput(key, 'userStatus', e.target.value)}
+                                                >
+                                                    <option value="">— Select —</option>
+                                                    <option value="Pending">Pending</option>
+                                                    <option value="In Transit">In Transit</option>
+                                                    <option value="Arrived">Arrived</option>
+                                                    <option value="Customs">Customs</option>
+                                                    <option value="Delayed">Delayed</option>
+                                                    <option value="Cancelled">Cancelled</option>
+                                                </select>
+                                            </td>
                                             <td style={{ textAlign: "right" }}><strong style={{ color: '#0f172a' }}>₱{fmt(po.totalAmount)}</strong></td>
                                         </tr>
-                                        {isOpen && (
+                                        {isOpen && po.lines.length > 0 && (
                                             <tr className="po-lines-row">
-                                                <td colSpan={7} style={{ padding: '1rem', textAlign: 'center', color: '#64748b', fontStyle: 'italic' }}>
-                                                    Item details placeholder...
+                                                <td colSpan={8}>
+                                                    <div className="po-lines-wrap">
+                                                        <table className="po-lines-table">
+                                                            <thead>
+                                                                <tr>
+                                                                    <th>Item</th>
+                                                                    <th>Description</th>
+                                                                    <th style={{ textAlign: 'right' }}>Qty</th>
+                                                                    <th style={{ textAlign: 'right' }}>Ext. Cost</th>
+                                                                </tr>
+                                                            </thead>
+                                                            <tbody>
+                                                                {po.lines.map((line, i) => (
+                                                                    <tr key={i}>
+                                                                        <td>
+                                                                            <span 
+                                                                                className="db-inv-id si-clickable-id"
+                                                                                style={{ fontSize: '0.7rem', padding: '0.15rem 0.4rem' }}
+                                                                                onClick={(e) => { e.stopPropagation(); setSelectedId(line.inventoryId); }}
+                                                                            >
+                                                                                {line.inventoryId}
+                                                                            </span>
+                                                                        </td>
+                                                                        <td style={{ color: '#64748b' }}>{line.description}</td>
+                                                                        <td style={{ textAlign: 'right', fontWeight: '700' }}>{Number(line.qty).toLocaleString()} {line.uom}</td>
+                                                                        <td style={{ textAlign: 'right', color: '#0f172a' }}>₱{fmt(line.extCost)}</td>
+                                                                    </tr>
+                                                                ))}
+                                                            </tbody>
+                                                        </table>
+                                                    </div>
                                                 </td>
                                             </tr>
                                         )}
@@ -108,7 +373,69 @@ export default function PurchaseOrdersPage() {
                         </tbody>
                     </table>
                 </div>
+
+                {!loading && (
+                    <div className="db-pagination">
+                        <span className="db-page-info">Page <strong>{page}</strong></span>
+                        <div className="db-page-btns">
+                            <button className="db-page-btn" onClick={() => setPage(p => Math.max(1, p - 1))} disabled={page === 1}>
+                                <IconChevronLeft />
+                            </button>
+                            <button className="db-page-btn" onClick={() => setPage(p => p + 1)} disabled={!hasMore}>
+                                <IconChevronRight />
+                            </button>
+                        </div>
+                    </div>
+                )}
             </main>
+
+            <aside className="po-right-panel">
+                <div className="po-summary-card">
+                    <h3 className="po-summary-title">
+                        <IconActivity /> Analytics Summary
+                    </h3>
+                    
+                    <div className="po-summary-item">
+                        <span className="po-summary-label">Total Purchase Orders</span>
+                        <span className="po-summary-value">{orders.length} Orders</span>
+                    </div>
+
+                    <div className="po-summary-item" style={{ color: summaryStats.pendingEtaCount > 0 ? '#dc2626' : 'inherit' }}>
+                        <span className="po-summary-label">Pending ETA</span>
+                        <span className="po-summary-value">{summaryStats.pendingEtaCount}</span>
+                    </div>
+
+                    <div className="po-summary-item">
+                        <span className="po-summary-label">Open Status</span>
+                        <span className="po-summary-value">{summaryStats.openCount}</span>
+                    </div>
+
+                    <div className="po-summary-item" style={{ borderBottom: 'none', paddingTop: '1.25rem' }}>
+                        <span className="po-summary-label" style={{ fontWeight: '700', color: '#0f172a' }}>Total Value</span>
+                        <span className="po-summary-value" style={{ fontSize: '1.1rem', color: '#2563eb' }}>₱{fmt(summaryStats.totalValue)}</span>
+                    </div>
+                </div>
+
+                <div className="po-info-box">
+                    <h4 className="po-info-title">
+                        <IconInfo /> Module Guide
+                    </h4>
+                    <p className="po-info-text">
+                        This module displays all Purchase Orders from Acumatica. You can track their status and manage ETA for upcoming deliveries.
+                    </p>
+                    <p className="po-info-text" style={{ marginTop: '0.5rem' }}>
+                        All changes are saved automatically to your local session.
+                    </p>
+                </div>
+
+                <div style={{ padding: '1rem', border: '1px dashed #cbd5e1', borderRadius: '12px', textAlign: 'center' }}>
+                    <span style={{ fontSize: '0.7rem', color: '#94a3b8', textTransform: 'uppercase', fontWeight: '700' }}>KGS Purchasing System v1.0</span>
+                </div>
+            </aside>
+
+            {selectedId && (
+                <InventoryDetailModal inventoryId={selectedId} onClose={() => setSelectedId(null)} />
+            )}
         </div>
     );
 }

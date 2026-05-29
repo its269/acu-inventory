@@ -126,7 +126,7 @@ export const AcumaticaService = {
 
         let filterArr = [];
         if (search) {
-            filterArr.push(`contains(OrderNbr, '${search}')`);
+            filterArr.push(`(contains(OrderNbr, '${search}') or contains(VendorID, '${search}') or contains(VendorName, '${search}') or Details/any(d: contains(d/InventoryID, '${search}')))`);
         }
         if (status) {
             filterArr.push(`Status eq '${status}'`);
@@ -162,6 +162,76 @@ export const AcumaticaService = {
         }));
 
         return { orders, hasMore };
+    },
+
+    /** ── VENDORS (SUPPLIERS) ── */
+    async getVendors({ page = 1, pageSize = 50, search = "", cookie }) {
+        const skip = (page - 1) * pageSize;
+        const top = pageSize + 1;
+
+        let filterArr = [];
+        if (search) {
+            filterArr.push(`(contains(VendorID, '${search}') or contains(VendorName, '${search}'))`);
+        }
+
+        const filter = filterArr.length > 0 ? `&$filter=${filterArr.join(" and ")}` : "";
+        const url = `${ACU_BASE}/Vendor?$top=${top}&$skip=${skip}${filter}`;
+
+        console.log(`>>> [Acumatica] Fetching Vendors: ${url}`);
+        const res = await this.fetchWithRetry(url, cookie);
+        const data = await res.json();
+        const rawVendors = data.value || (Array.isArray(data) ? data : []);
+
+        const hasMore = rawVendors.length > pageSize;
+        const vendors = rawVendors.slice(0, pageSize).map(v => ({
+            vendorId: getF(v, "VendorID"),
+            vendorName: getF(v, "VendorName"),
+            status: getF(v, "Status")
+        }));
+
+        return { vendors, hasMore };
+    },
+
+    /** ── REPLENISHMENT RECOMMENDATIONS ── */
+    async getReplenishmentRecommendations({ cookie }) {
+        // We derive recommendations from items with low stock availability
+        const url = `${ACU_BASE}/StockItem?$expand=WarehouseDetails&$top=100`;
+        const res = await this.fetchWithRetry(url, cookie);
+        const data = await res.json();
+        const items = data.value || [];
+
+        const recommendations = [];
+        let recId = 1000;
+
+        for (const item of items) {
+            const inventoryId = getF(item, "InventoryID");
+            const description = getF(item, "Description");
+            const wds = item.WarehouseDetails || [];
+            
+            // Sum availability across warehouses
+            const totalAvailable = wds.reduce((sum, wh) => sum + parseFloat(getF(wh, "QtyAvailable") || 0), 0);
+
+            // Logic: If available < 50, recommend replenishment
+            if (totalAvailable < 50) {
+                const suggestedQty = 100 - totalAvailable;
+                const priority = totalAvailable < 10 ? "High" : totalAvailable < 30 ? "Medium" : "Low";
+                
+                recommendations.push({
+                    recommendationId: `REC-${recId++}`,
+                    itemId: inventoryId,
+                    description: description,
+                    currentStock: totalAvailable,
+                    suggestedQty: Math.ceil(suggestedQty),
+                    priorityLevel: priority,
+                    generatedDate: new Date().toISOString()
+                });
+            }
+        }
+
+        return recommendations.sort((a, b) => {
+            const pMap = { "High": 3, "Medium": 2, "Low": 1 };
+            return pMap[b.priorityLevel] - pMap[a.priorityLevel];
+        });
     },
 
     /** ── SALES: Discover Periods and Fetch Data ── */

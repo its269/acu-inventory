@@ -32,6 +32,18 @@ const IconSales = () => (
   </svg>
 );
 
+const IconTruck = () => (
+  <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M10 17h4V5H2v12h3" /><path d="M20 17h2v-3.34a4 4 0 0 0-1.17-2.83L17 7h-3v10" /><circle cx="7.5" cy="17.5" r="2.5" /><circle cx="17.5" cy="17.5" r="2.5" />
+  </svg>
+);
+
+const IconSparkles = () => (
+  <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="m12 3-1.912 5.813a2 2 0 0 1-1.275 1.275L3 12l5.813 1.912a2 2 0 0 1 1.275 1.275L12 21l1.912-5.813a2 2 0 0 1 1.275-1.275L21 12l-5.813-1.912a2 2 0 0 1-1.275-1.275L12 3Z" /><path d="M5 3v4" /><path d="M19 17v4" /><path d="M3 5h4" /><path d="M17 19h4" />
+  </svg>
+);
+
 export default function Sidebar() {
   const pathname = usePathname();
   const [mounted, setMounted] = useState(false);
@@ -86,6 +98,8 @@ export default function Sidebar() {
     { name: "Stock Items", href: "/stock-items", icon: <IconStock /> },
     { name: "Purchase Orders", href: "/purchase-orders", icon: <IconPO /> },
     { name: "Incoming PO", href: "/incoming-po", icon: <IconPO /> },
+    { name: "Suppliers", href: "/suppliers", icon: <IconTruck /> },
+    { name: "Replenishment", href: "/replenishment", icon: <IconSparkles /> },
     { name: "Last 3 Months Sales", href: "/sales", icon: <IconSales /> },
   ];
 
