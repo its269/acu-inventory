@@ -130,9 +130,6 @@ export default function DashboardPage() {
     const [branchOptions, setBranchOptions] = useState([]);
     const [debouncedSearch, setDebouncedSearch] = useState("");
     const [loading, setLoading] = useState(true);
-    const [syncing, setSyncing] = useState(false);
-    const [syncProgress, setSyncProgress] = useState({ current: 0, total: 27881, stage: "" });
-    const [syncLogs, setSyncLogs] = useState([]);
 
     // Hydration fix & Initial Restoration
     useEffect(() => {

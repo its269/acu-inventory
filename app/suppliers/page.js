@@ -174,14 +174,6 @@ export default function SuppliersPage() {
                             />
                         </div>
                     </div>
-                    <div className="db-toolbar-right">
-                        <button className="db-refresh-btn" onClick={() => fetchVendors()} disabled={loading}>
-                            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                                {loading && <div className="db-spinner" style={{ width: '14px', height: '14px', borderWidth: '2px' }}></div>}
-                                <span>{loading ? "Syncing..." : "Refresh Suppliers"}</span>
-                            </div>
-                        </button>
-                    </div>
                 </div>
 
                 {error && <div className="si-error">{error}</div>}
