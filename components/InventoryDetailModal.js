@@ -38,15 +38,22 @@ export default function InventoryDetailModal({ inventoryId, onClose }) {
         if (!inventoryId) return;
 
         const cacheKey = `stock_detail_${inventoryId}`;
-        const cached = DataCache.get(cacheKey);
-        if (cached) {
-            setDetail(cached);
-            setLoading(false);
-        }
+        
+        // Use a local variable to track cache presence for fetchDetail
+        let hasCache = false;
+
+        Promise.resolve().then(() => {
+            const cached = DataCache.get(cacheKey);
+            if (cached) {
+                hasCache = true;
+                setDetail(cached);
+                setLoading(false);
+            }
+        });
 
         const controller = new AbortController();
         const fetchDetail = async () => {
-            if (!cached) setLoading(true);
+            if (!hasCache) setLoading(true);
             setError(null);
             try {
                 const r = await fetch(`/api/stock-items/${encodeURIComponent(inventoryId)}`, { signal: controller.signal });

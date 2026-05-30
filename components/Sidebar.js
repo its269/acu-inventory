@@ -34,13 +34,13 @@ const IconSales = () => (
 
 const IconTruck = () => (
   <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <path d="M10 17h4V5H2v12h3" /><path d="M20 17h2v-3.34a4 4 0 0 0-1.17-2.83L17 7h-3v10" /><circle cx="7.5" cy="17.5" r="2.5" /><circle cx="17.5" cy="17.5" r="2.5" />
+    <path d="M10 17h4V5H2v12h3" /><path d="M20 17h2v-3.34a4 4 0 0 0-1.17-2.83L17 7h-3v10" /><circle cx="7.5" cy="17.5" r="2.5" /><circle cx="17.5" cy="17.5" r="2.5" />
   </svg>
 );
 
 const IconSparkles = () => (
   <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <path d="m12 3-1.912 5.813a2 2 0 0 1-1.275 1.275L3 12l5.813 1.912a2 2 0 0 1 1.275 1.275L12 21l1.912-5.813a2 2 0 0 1 1.275-1.275L21 12l-5.813-1.912a2 2 0 0 1-1.275-1.275L12 3Z" /><path d="M5 3v4" /><path d="M19 17v4" /><path d="M3 5h4" /><path d="M17 19h4" />
+    <path d="m12 3-1.912 5.813a2 2 0 0 1-1.275 1.275L3 12l5.813 1.912a2 2 0 0 1 1.275 1.275L12 21l1.912-5.813a2 2 0 0 1 1.275-1.275L21 12l-5.813-1.912a2 2 0 0 1-1.275-1.275L12 3Z" /><path d="M5 3v4" /><path d="M19 17v4" /><path d="M3 5h4" /><path d="M17 19h4" />
   </svg>
 );
 
@@ -53,45 +53,40 @@ export default function Sidebar() {
   const [isCollapsed, setIsCollapsed] = useState(false);
 
   useEffect(() => {
-    Promise.resolve().then(() => setMounted(true));
-
-    // Load initial collapse state
-    const savedCollapse = localStorage.getItem("sidebar_collapsed");
-    if (savedCollapse === "true") {
-      setIsCollapsed(true);
-      document.body.classList.add("sidebar-collapsed");
-    }
+    Promise.resolve().then(() => {
+      setMounted(true);
+      
+      const storedUser = localStorage.getItem("userName");
+      if (storedUser) setUserName(storedUser);
+      
+      const savedCollapse = localStorage.getItem("sidebar_collapsed") === "true";
+      if (savedCollapse) setIsCollapsed(true);
+    });
   }, []);
+
+  // Sync collapsed state with body class
+  useEffect(() => {
+    if (isCollapsed) {
+      document.body.classList.add("sidebar-collapsed");
+    } else {
+      document.body.classList.remove("sidebar-collapsed");
+    }
+  }, [isCollapsed]);
 
   const toggleCollapse = () => {
     setIsCollapsed(prev => {
       const next = !prev;
       localStorage.setItem("sidebar_collapsed", String(next));
-      if (next) {
-        document.body.classList.add("sidebar-collapsed");
-      } else {
-        document.body.classList.remove("sidebar-collapsed");
-      }
       return next;
     });
   };
 
   // Close sidebar on navigation (mobile)
   useEffect(() => {
-    // Only update if it's currently open to avoid lint warning about unnecessary state update
-    setIsOpen(open => open ? false : false);
-  }, [pathname]);
-
-  useEffect(() => {
-    // We use useEffect here because localStorage is only available on the client.
-    // To satisfy the strict "no-setState-in-effect" lint rule, we could use an async wrapper
-    // or simply accept the initial render and update once client-side.
-    const stored = localStorage.getItem("userName");
-    if (stored) {
-      // Use a microtask to avoid synchronous state update in effect body
-      Promise.resolve().then(() => setUserName(stored));
+    if (isOpen) {
+      Promise.resolve().then(() => setIsOpen(false));
     }
-  }, []);
+  }, [pathname, isOpen]);
 
   const navItems = [
     { name: "Inventory", href: "/dashboard", icon: <IconInventory /> },
@@ -141,7 +136,7 @@ export default function Sidebar() {
             <span className="sidebar-logo">
               <img src="/KELIN LOGO-01.png" alt="KGS Logo" style={{ width: '38px', marginLeft: '4px' }} />
             </span>
-            {!isCollapsed && <span>KGS PURCHASING</span>}
+            {!isCollapsed && <span>KGS PURCHASE</span>}
           </div>
           {!isCollapsed && (
             <div className="sidebar-user-header">

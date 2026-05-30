@@ -48,32 +48,45 @@ function fmtDate(d) {
 }
 
 export default function IncomingPOPage() {
+    /* ── State ────────────────────────────────────────────── */
     const [orders, setOrders] = useState([]);
-    const [page, setPage] = useState(() => {
-        if (typeof window !== "undefined") {
-            const stored = localStorage.getItem("inc_po_filter_page");
-            return stored ? parseInt(stored) : 1;
-        }
-        return 1;
-    });
+    const [page, setPage] = useState(1);
     const [hasMore, setHasMore] = useState(false);
-    const [search, setSearch] = useState(() => {
-        if (typeof window !== "undefined") return localStorage.getItem("inc_po_filter_search") || "";
-        return "";
-    });
+    const [search, setSearch] = useState("");
     const [debSearch, setDebSearch] = useState("");
-    const [startDate, setStartDate] = useState(() => {
-        if (typeof window !== "undefined") return localStorage.getItem("inc_po_filter_startDate") || "";
-        return "";
-    });
-    const [status, setStatus] = useState(() => {
-        if (typeof window !== "undefined") return localStorage.getItem("inc_po_filter_status") || "Open";
-        return "Open";
-    });
+    const [startDate, setStartDate] = useState("");
+    const [status, setStatus] = useState("Open");
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState(null);
     const [expanded, setExpanded] = useState({}); // orderNbr -> bool
     const [selectedId, setSelectedId] = useState(null);
+
+    // Initial restoration & Hydration fix
+    useEffect(() => {
+        Promise.resolve().then(() => {
+            const savedPage = parseInt(localStorage.getItem("inc_po_filter_page") || "1");
+            const savedSearch = localStorage.getItem("inc_po_filter_search") || "";
+            const savedStart = localStorage.getItem("inc_po_filter_startDate") || "";
+            const savedStatus = localStorage.getItem("inc_po_filter_status") || "Open";
+
+            if (savedPage > 1) setPage(savedPage);
+            if (savedSearch) setSearch(savedSearch);
+            if (savedStart) setStartDate(savedStart);
+            if (savedStatus !== "Open") setStatus(savedStatus);
+
+            const params = new URLSearchParams({
+                page: String(savedPage),
+                pageSize: String(PAGE_SIZE),
+                startDate: savedStart,
+                status: savedStatus
+            });
+            const cached = DataCache.get(`inc_po_orders_${params.toString()}`);
+            if (cached) {
+                setOrders(cached.orders ?? []);
+                setHasMore(cached.hasMore ?? false);
+            }
+        });
+    }, []);
 
     // Save filters to localStorage
     useEffect(() => {
@@ -121,7 +134,6 @@ export default function IncomingPOPage() {
             setLoading(false);
         }
     }, [page, debSearch, startDate, status]);
-
     useEffect(() => {
         const params = new URLSearchParams({
             page: String(page),
@@ -134,12 +146,9 @@ export default function IncomingPOPage() {
 
         const cached = DataCache.get(cacheKey);
         if (cached) {
-            setOrders(cached.orders ?? []);
-            setHasMore(cached.hasMore ?? false);
-            setLoading(false);
-            fetchOrders(true);
+            Promise.resolve().then(() => fetchOrders(true));
         } else {
-            fetchOrders(false);
+            Promise.resolve().then(() => fetchOrders(false));
         }
     }, [fetchOrders, page, debSearch, startDate, status]);
 

@@ -43,25 +43,35 @@ const LEAD_TIME_OPTIONS = [
 ];
 
 export default function SuppliersPage() {
+    /* ── State ────────────────────────────────────────────── */
     const [vendors, setVendors] = useState([]);
-    const [page, setPage] = useState(1);
     const [hasMore, setHasMore] = useState(false);
+    const [page, setPage] = useState(1);
     const [search, setSearch] = useState("");
     const [debouncedSearch, setDebouncedSearch] = useState("");
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState(null);
-    const [leadTimes, setLeadTimes] = useState({}); // vendorId -> value
+    const [leadTimes, setLeadTimes] = useState({});
 
-    // Load lead times from localStorage
+    // Initial restoration & Hydration fix
     useEffect(() => {
-        const saved = localStorage.getItem("supplier_lead_times");
-        if (saved) {
-            try {
-                setLeadTimes(JSON.parse(saved));
-            } catch (e) {
-                console.error("Failed to parse lead times", e);
+        Promise.resolve().then(() => {
+            const savedLeadTimes = localStorage.getItem("supplier_lead_times");
+            if (savedLeadTimes) {
+                try {
+                    setLeadTimes(JSON.parse(savedLeadTimes));
+                } catch (e) {
+                    console.error("Failed to parse lead times", e);
+                }
             }
-        }
+
+            const params = new URLSearchParams({ page: "1", pageSize: String(PAGE_SIZE) });
+            const cached = DataCache.get(`vendors_${params.toString()}`);
+            if (cached) {
+                setVendors(cached.vendors ?? []);
+                setHasMore(cached.hasMore ?? false);
+            }
+        });
     }, []);
 
     // Save lead times to localStorage
@@ -81,7 +91,7 @@ export default function SuppliersPage() {
     }, [search]);
 
     useEffect(() => {
-        setPage(1);
+        Promise.resolve().then(() => setPage(1));
     }, [debouncedSearch]);
 
     const fetchVendors = useCallback(async (isBackground = false) => {
@@ -112,12 +122,9 @@ export default function SuppliersPage() {
 
         const cached = DataCache.get(cacheKey);
         if (cached) {
-            setVendors(cached.vendors ?? []);
-            setHasMore(cached.hasMore ?? false);
-            setLoading(false);
-            fetchVendors(true);
+            Promise.resolve().then(() => fetchVendors(true));
         } else {
-            fetchVendors(false);
+            Promise.resolve().then(() => fetchVendors(false));
         }
     }, [fetchVendors, page, debouncedSearch]);
 
@@ -185,19 +192,20 @@ export default function SuppliersPage() {
                             <tr>
                                 <th style={{ width: '200px', padding: '1.25rem' }}>Supplier ID</th>
                                 <th style={{ padding: '1.25rem' }}>Supplier Name</th>
+                                <th style={{ width: '180px', padding: '1.25rem', textAlign: 'center' }}>Reliability Score</th>
                                 <th style={{ width: '220px', padding: '1.25rem' }}>Avg. Lead Time</th>
                             </tr>
                         </thead>
                         <tbody>
                             {loading && vendors.length === 0 ? (
-                                <tr><td colSpan={3} className="si-loading-cell">
+                                <tr><td colSpan={4} className="si-loading-cell">
                                     <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '1rem', padding: '4rem' }}>
                                         <div className="db-spinner db-spinner-lg"></div>
                                         <span style={{ color: '#64748b', fontWeight: '500' }}>Fetching suppliers from Acumatica...</span>
                                     </div>
                                 </td></tr>
                             ) : vendors.length === 0 ? (
-                                <tr><td colSpan={3} className="si-empty-cell" style={{ padding: '4rem' }}>No suppliers found matching your criteria.</td></tr>
+                                <tr><td colSpan={4} className="si-empty-cell" style={{ padding: '4rem' }}>No suppliers found matching your criteria.</td></tr>
                             ) : vendors.map(v => (
                                 <tr key={v.vendorId} className="db-clickable-row">
                                     <td style={{ padding: '1.25rem' }}>
@@ -206,6 +214,23 @@ export default function SuppliersPage() {
                                     <td style={{ padding: '1.25rem' }}>
                                         <div style={{ fontWeight: '600', color: '#0f172a', fontSize: '0.95rem' }}>{v.vendorName}</div>
                                         <div style={{ fontSize: '0.75rem', color: '#94a3b8', marginTop: '0.25rem' }}>{v.status}</div>
+                                    </td>
+                                    <td style={{ padding: '1.25rem', textAlign: 'center' }}>
+                                        <div style={{ 
+                                            display: 'inline-flex', 
+                                            alignItems: 'center', 
+                                            justifyContent: 'center',
+                                            width: '50px', 
+                                            height: '50px', 
+                                            borderRadius: '50%', 
+                                            border: `4px solid ${v.reliabilityScore >= 90 ? '#22c55e' : v.reliabilityScore >= 80 ? '#eab308' : '#ef4444'}`,
+                                            fontWeight: '700',
+                                            fontSize: '0.85rem',
+                                            color: '#0f172a',
+                                            background: '#fff'
+                                        }}>
+                                            {v.reliabilityScore}%
+                                        </div>
                                     </td>
                                     <td style={{ padding: '1.25rem' }}>
                                         <div className="db-select-wrapper" style={{ height: '40px', background: '#fff' }}>

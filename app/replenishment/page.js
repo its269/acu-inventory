@@ -38,6 +38,14 @@ export default function ReplenishmentPage() {
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState(null);
 
+    // Initial restoration & Hydration fix
+    useEffect(() => {
+        Promise.resolve().then(() => {
+            const cached = DataCache.get("replenishment_recs");
+            if (cached) setRecs(cached || []);
+        });
+    }, []);
+
     const fetchRecommendations = useCallback(async (isBackground = false) => {
         if (!isBackground) setLoading(true);
         setError(null);
@@ -59,11 +67,9 @@ export default function ReplenishmentPage() {
         const cacheKey = "replenishment_recs";
         const cached = DataCache.get(cacheKey);
         if (cached) {
-            setRecs(cached);
-            setLoading(false);
-            fetchRecommendations(true);
+            Promise.resolve().then(() => fetchRecommendations(true));
         } else {
-            fetchRecommendations(false);
+            Promise.resolve().then(() => fetchRecommendations(false));
         }
     }, [fetchRecommendations]);
 
@@ -112,7 +118,14 @@ export default function ReplenishmentPage() {
                         </div>
                     </div>
                     <div className="db-toolbar-right">
-                        <button className="db-refresh-btn" onClick={() => fetchRecommendations()} disabled={loading}>
+                        <button 
+                            className="db-refresh-btn" 
+                            onClick={() => {
+                                DataCache.delete("replenishment_recs");
+                                fetchRecommendations();
+                            }} 
+                            disabled={loading}
+                        >
                             <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                                 {loading && <div className="db-spinner" style={{ width: '14px', height: '14px', borderWidth: '2px' }}></div>}
                                 <span>{loading ? "Analyzing..." : "Run Analysis"}</span>
@@ -145,7 +158,18 @@ export default function ReplenishmentPage() {
                                     </div>
                                 </td></tr>
                             ) : recs.length === 0 ? (
-                                <tr><td colSpan={7} className="si-empty-cell" style={{ padding: '4rem' }}>No replenishment needed at this time. All stock levels are healthy.</td></tr>
+                                <tr><td colSpan={7} className="si-empty-cell" style={{ padding: '4rem' }}>
+                                    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '1rem' }}>
+                                        <IconAlertCircle />
+                                        <span>No replenishment needed at this time. All scanned items have healthy stock levels (&gt;50 units).</span>
+                                        <button 
+                                            onClick={() => fetchRecommendations()} 
+                                            style={{ background: 'none', border: '1px solid #2563eb', color: '#2563eb', padding: '8px 16px', borderRadius: '8px', cursor: 'pointer', fontSize: '0.85rem' }}
+                                        >
+                                            Scan Again
+                                        </button>
+                                    </div>
+                                </td></tr>
                             ) : recs.map(r => (
                                 <tr key={r.recommendationId} className="db-clickable-row">
                                     <td style={{ padding: '1.25rem' }}>
