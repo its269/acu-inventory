@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback, useEffect, memo, Fragment } from "react";
+import { useState, useCallback, useEffect, memo, Fragment, useMemo } from "react";
 import { useRouter } from "next/navigation";
 import { DataCache } from "@/lib/data-cache";
 import "@/styles/dashboard.css";
@@ -35,46 +35,63 @@ const monthNames = [
     "July", "August", "September", "October", "November", "December"
 ];
 
-const currentYear = new Date().getFullYear();
-const years = Array.from({ length: 6 }, (_, i) => currentYear - i);
+const currentYearNum = new Date().getFullYear();
+const years = Array.from({ length: 6 }, (_, i) => currentYearNum - i);
 
 export default function SalesPeriodicPage() {
     const router = useRouter();
     const [mounted, setMounted] = useState(false);
-    const [branchOptions, setBranchOptions] = useState([]);
+
+    /* ── State ────────────────────────────────────────────── */
     const [selectedBranch, setSelectedBranch] = useState("");
-    const [allSalesData, setAllSalesData] = useState([]); // Store everything
-    const [salesData, setSalesData] = useState([]);      // Current page slice
+    const [targetMonth, setTargetMonth] = useState(new Date().getMonth() + 1);
+    const [targetYear, setTargetYear] = useState(currentYearNum);
+    const [branchOptions, setBranchOptions] = useState([]);
+    const [allSalesData, setAllSalesData] = useState([]);
     const [months, setMonths] = useState([]);
-    const [loading, setLoading] = useState(false);
+    const [loading, setLoading] = useState(true);
     const [error, setError] = useState("");
-    
     const [currentPage, setCurrentPage] = useState(1);
     const [pageSize] = useState(15);
     const [pagination, setPagination] = useState({ totalItems: 0, totalPages: 0 });
     const [metrics, setMetrics] = useState({ overallStocks: 0, totalRevenue: 0, uniqueProducts: 0, totalQtySold: 0 });
-    
-    const [targetMonth, setTargetMonth] = useState(new Date().getMonth() + 1);
-    const [targetYear, setTargetYear] = useState(currentYear);
 
-    // Update current page slice whenever allSalesData or currentPage changes
+    // Initial restoration & Hydration fix
     useEffect(() => {
+        Promise.resolve().then(() => {
+            setMounted(true);
+            const b = localStorage.getItem("sales_filter_branch") || "";
+            const m = localStorage.getItem("sales_filter_month");
+            const y = localStorage.getItem("sales_filter_year");
+
+            const finalMonth = m ? parseInt(m) : new Date().getMonth() + 1;
+            const finalYear = y ? parseInt(y) : currentYearNum;
+
+            if (b) setSelectedBranch(b);
+            if (m) setTargetMonth(finalMonth);
+            if (y) setTargetYear(finalYear);
+
+            const params = new URLSearchParams({
+                branch: b,
+                month: finalMonth.toString(),
+                year: finalYear.toString()
+            });
+            const cached = DataCache.get(`sales_periodic_all_${params.toString()}`);
+            if (cached) {
+                setAllSalesData(cached.data || []);
+                setMonths(cached.months || []);
+                setPagination(cached.pagination || { totalItems: 0, totalPages: 0 });
+                setMetrics(cached.metrics || { overallStocks: 0, totalRevenue: 0, uniqueProducts: 0, totalQtySold: 0 });
+            }
+        });
+    }, []);
+
+    // Derived state: current page slice
+    const salesData = useMemo(() => {
         const start = (currentPage - 1) * pageSize;
         const end = start + pageSize;
-        setSalesData(allSalesData.slice(start, end));
+        return allSalesData.slice(start, end);
     }, [allSalesData, currentPage, pageSize]);
-
-    // Initial hydration and restore from localStorage
-    useEffect(() => {
-        setMounted(true);
-        const branch = localStorage.getItem("sales_filter_branch") || "";
-        const month = localStorage.getItem("sales_filter_month");
-        const year = localStorage.getItem("sales_filter_year");
-
-        if (branch) setSelectedBranch(branch);
-        if (month) setTargetMonth(parseInt(month));
-        if (year) setTargetYear(parseInt(year));
-    }, []);
 
     // Save filters to localStorage when they change
     useEffect(() => {
@@ -112,7 +129,6 @@ export default function SalesPeriodicPage() {
             setLoading(true);
             setError("");
             setAllSalesData([]);
-            setSalesData([]);
             setMonths([]);
             setCurrentPage(1);
 
@@ -148,8 +164,8 @@ export default function SalesPeriodicPage() {
         }
     }, [selectedBranch, targetMonth, targetYear, router]);
 
-    /* ── Restore from cache ─────────────────────────────── */
     useEffect(() => {
+        if (!mounted) return;
         const params = new URLSearchParams({
             branch: selectedBranch,
             month: targetMonth.toString(),
@@ -158,12 +174,11 @@ export default function SalesPeriodicPage() {
         const cacheKey = `sales_periodic_all_${params.toString()}`;
         const cached = DataCache.get(cacheKey);
         if (cached) {
-            setAllSalesData(cached.data || []);
-            setMonths(cached.months || []);
-            if (cached.pagination) setPagination(cached.pagination);
-            if (cached.metrics) setMetrics(cached.metrics);
+            Promise.resolve().then(() => fetchSales(true));
+        } else {
+            Promise.resolve().then(() => fetchSales(false));
         }
-    }, [selectedBranch, targetMonth, targetYear]);
+    }, [fetchSales, selectedBranch, targetMonth, targetYear, mounted]);
 
     /* ── Export CSV ─────────────────────────────────────── */
     const exportCSV = useCallback(() => {

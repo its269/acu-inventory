@@ -126,7 +126,7 @@ export const AcumaticaService = {
 
         let filterArr = [];
         if (search) {
-            filterArr.push(`contains(OrderNbr, '${search}')`);
+            filterArr.push(`(contains(OrderNbr, '${search}') or contains(VendorID, '${search}') or contains(VendorName, '${search}') or Details/any(d: contains(d/InventoryID, '${search}')))`);
         }
         if (status) {
             filterArr.push(`Status eq '${status}'`);
@@ -162,6 +162,100 @@ export const AcumaticaService = {
         }));
 
         return { orders, hasMore };
+    },
+
+    /** ── VENDORS (SUPPLIERS) ── */
+    async getVendors({ page = 1, pageSize = 50, search = "", cookie }) {
+        const skip = (page - 1) * pageSize;
+        const top = pageSize + 1;
+
+        let filterArr = [];
+        if (search) {
+            filterArr.push(`(contains(VendorID, '${search}') or contains(VendorName, '${search}'))`);
+        }
+
+        const filter = filterArr.length > 0 ? `&$filter=${filterArr.join(" and ")}` : "";
+        const url = `${ACU_BASE}/Vendor?$top=${top}&$skip=${skip}${filter}`;
+
+        console.log(`>>> [Acumatica] Fetching Vendors: ${url}`);
+        const res = await this.fetchWithRetry(url, cookie);
+        const data = await res.json();
+        const rawVendors = data.value || (Array.isArray(data) ? data : []);
+
+        const hasMore = rawVendors.length > pageSize;
+        const vendors = rawVendors.slice(0, pageSize).map(v => ({
+            vendorId: getF(v, "VendorID"),
+            vendorName: getF(v, "VendorName"),
+            status: getF(v, "Status"),
+            reliabilityScore: parseFloat(getF(v, "ReliabilityScore") || (Math.random() * 20 + 80).toFixed(1)) // Mock if not in API
+        }));
+
+        return { vendors, hasMore };
+    },
+
+    /** ── REPLENISHMENT RECOMMENDATIONS ── */
+    async getReplenishmentRecommendations({ cookie }) {
+        // Helper to try multiple field names
+        const getAny = (obj, ...keys) => {
+            for (const k of keys) {
+                const v = getF(obj, k);
+                if (v !== "" && v !== null && v !== undefined) return v;
+            }
+            return "";
+        };
+
+        // We derive recommendations from active items with low stock availability
+        // Scan 300 items to ensure we find enough low-stock candidates
+        const url = `${ACU_BASE}/StockItem?$expand=WarehouseDetails&$top=300&$filter=ItemStatus eq 'Active'`;
+        const res = await this.fetchWithRetry(url, cookie);
+        const data = await res.json();
+        const items = data.value || (Array.isArray(data) ? data : []);
+
+        const recommendations = [];
+        let recId = 1000;
+
+        for (const item of items) {
+            const inventoryId = getF(item, "InventoryID");
+            if (!inventoryId) continue;
+
+            const description = getF(item, "Description");
+            let wds = item.WarehouseDetails || [];
+            
+            // Handle cases where expansion is wrapped in { value: [...] }
+            if (wds && !Array.isArray(wds) && wds.value) wds = wds.value;
+            if (!Array.isArray(wds)) wds = [];
+            
+            // Sum availability across all warehouses
+            // We use QtyAvailable as the primary metric, but fallback to QtyOnHand if missing
+            const totalAvailable = wds.reduce((sum, wh) => {
+                const val = parseFloat(getAny(wh, "QtyAvailable", "Available", "QtyOnHand", "OnHand", "Qty", "AvailableQty", "QtyAvail") || 0);
+                return sum + (isNaN(val) ? 0 : val);
+            }, 0);
+
+            // Logic: If available < 50 units total, recommend replenishment
+            if (totalAvailable < 50) {
+                const suggestedQty = 100 - totalAvailable;
+                const priority = totalAvailable < 10 ? "High" : totalAvailable < 30 ? "Medium" : "Low";
+                
+                recommendations.push({
+                    recommendationId: `REC-${recId++}`,
+                    itemId: inventoryId,
+                    description: description,
+                    currentStock: totalAvailable,
+                    suggestedQty: Math.ceil(suggestedQty),
+                    priorityLevel: priority,
+                    generatedDate: new Date().toISOString()
+                });
+            }
+        }
+
+        return recommendations.sort((a, b) => {
+            const pMap = { "High": 3, "Medium": 2, "Low": 1 };
+            if (pMap[b.priorityLevel] !== pMap[a.priorityLevel]) {
+                return pMap[b.priorityLevel] - pMap[a.priorityLevel];
+            }
+            return a.currentStock - b.currentStock; // Lower stock first within same priority
+        });
     },
 
     /** ── SALES: Discover Periods and Fetch Data ── */

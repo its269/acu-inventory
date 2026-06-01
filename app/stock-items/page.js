@@ -35,6 +35,18 @@ export default function StockItemsPage() {
     const [error, setError] = useState(null);
     const [selectedId, setSelectedId] = useState(null);
 
+    // Initial restoration & Hydration fix
+    useEffect(() => {
+        Promise.resolve().then(() => {
+            const params = new URLSearchParams({ page: "1", pageSize: String(PAGE_SIZE) });
+            const cached = DataCache.get(`stock_items_${params.toString()}`);
+            if (cached) {
+                setItems(cached.items ?? []);
+                setTotalCount(cached.totalCount ?? 0);
+            }
+        });
+    }, []);
+
     useEffect(() => {
         const t = setTimeout(() => setDebouncedSearch(search), 300);
         return () => clearTimeout(t);
@@ -72,12 +84,9 @@ export default function StockItemsPage() {
 
         const cached = DataCache.get(cacheKey);
         if (cached) {
-            setItems(cached.items ?? []);
-            setTotalCount(cached.totalCount ?? 0);
-            setLoading(false);
-            fetchItems(true);
+            Promise.resolve().then(() => fetchItems(true));
         } else {
-            fetchItems(false);
+            Promise.resolve().then(() => fetchItems(false));
         }
     }, [fetchItems, page, debouncedSearch]);
 

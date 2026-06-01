@@ -117,32 +117,50 @@ export default function DashboardPage() {
     const router = useRouter();
 
     /* ── State ────────────────────────────────────────────── */
+    const [selectedBranch, setSelectedBranch] = useState("");
+    const [search, setSearch] = useState("");
+    const [page, setPage] = useState(1);
+    const [userName, setUserName] = useState("User");
+
     const [allInventory, setAllInventory] = useState([]);
     const [totalCount, setTotalCount] = useState(0);
     const [globalStats, setGlobalStats] = useState({ totalValue: 0, lowStock: 0, outOfStock: 0 });
     const [hasMore, setHasMore] = useState(false);
-    const [selectedBranch, setSelectedBranch] = useState("");
+
     const [branchOptions, setBranchOptions] = useState([]);
-    const [search, setSearch] = useState("");
     const [debouncedSearch, setDebouncedSearch] = useState("");
     const [loading, setLoading] = useState(true);
-    const [syncing, setSyncing] = useState(false);
-    const [syncProgress, setSyncProgress] = useState({ current: 0, total: 27881, stage: "" });
-    const [syncLogs, setSyncLogs] = useState([]);
-    const [page, setPage] = useState(1);
 
-    const [userName, setUserName] = useState("User");
-
-    // Restore persisted filters after hydration (client-side only)
+    // Hydration fix & Initial Restoration
     useEffect(() => {
-        const branch = localStorage.getItem("db_filter_branch") || "";
-        const savedSearch = localStorage.getItem("db_filter_search") || "";
-        const savedPage = parseInt(localStorage.getItem("db_filter_page") || "1");
-        const savedUser = localStorage.getItem("userName") || "";
-        if (branch) setSelectedBranch(branch);
-        if (savedSearch) setSearch(savedSearch);
-        if (savedPage > 1) setPage(savedPage);
-        if (savedUser) setUserName(savedUser);
+        Promise.resolve().then(() => {
+            const b = localStorage.getItem("db_filter_branch") || "";
+            const s = localStorage.getItem("db_filter_search") || "";
+            const p = parseInt(localStorage.getItem("db_filter_page") || "1");
+            const u = localStorage.getItem("userName") || "User";
+
+            if (b) setSelectedBranch(b);
+            if (s) setSearch(s);
+            if (p > 1) setPage(p);
+            if (u !== "User") setUserName(u);
+
+            const params = new URLSearchParams({ 
+                page: String(p), 
+                pageSize: String(ROWS_PER_PAGE), 
+                search: s, 
+                branch: b, 
+                count: "true", 
+                stats: "true", 
+                source: "supabase" 
+            });
+            const cached = DataCache.get(`inventory_${params.toString()}`);
+            if (cached) {
+                setAllInventory(cached.data || []);
+                setTotalCount(cached.totalCount || 0);
+                setHasMore(!!cached.hasMore);
+                if (cached.globalStats) setGlobalStats(cached.globalStats);
+            }
+        });
     }, []);
 
     // Save filters to localStorage
@@ -223,15 +241,10 @@ export default function DashboardPage() {
 
         const cached = DataCache.get(cacheKey);
         if (cached) {
-            setAllInventory(cached.data || []);
-            setTotalCount(cached.totalCount || 0);
-            setHasMore(!!cached.hasMore);
-            if (cached.globalStats) setGlobalStats(cached.globalStats);
-            setLoading(false);
             // Re-fetch in background
-            fetchInventory(true);
+            Promise.resolve().then(() => fetchInventory(true));
         } else {
-            fetchInventory(false);
+            Promise.resolve().then(() => fetchInventory(false));
         }
     }, [page, debouncedSearch, selectedBranch, fetchInventory]);
 
