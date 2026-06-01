@@ -203,11 +203,8 @@ body.sidebar-collapsed .main-content {
 
 /* Collapse Toggle Button */
 .sidebar-collapse-btn {
-  position: absolute;
-  bottom: 85px; /* Above footer */
-  left: 0;
-  right: 0;
-  height: 40px;
+  width: 100%;
+  height: 44px;
   background: rgba(255, 255, 255, 0.03);
   border: none;
   border-top: 1px solid rgba(255, 255, 255, 0.05);
@@ -219,6 +216,7 @@ body.sidebar-collapsed .main-content {
   cursor: pointer;
   transition: all 0.2s ease;
   z-index: 10;
+  margin-top: auto; /* Push to bottom of nav area */
 }
 
 .sidebar-collapse-btn:hover {

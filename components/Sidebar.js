@@ -6,6 +6,7 @@ import { usePathname } from "next/navigation";
 import { DataCache } from "@/lib/data-cache";
 import "@/styles/sidebar.css";
 import SyncModal from "./SyncModal";
+import QuickSyncModal from "./QuickSyncModal";
 
 /* ── SVG Icons ─────────────────────────────────────────── */
 const IconInventory = () => (
@@ -50,6 +51,7 @@ export default function Sidebar() {
   const [userName, setUserName] = useState("Admin User");
   const [isOpen, setIsOpen] = useState(false);
   const [isCollapsed, setIsCollapsed] = useState(false);
+  const [showQuickSync, setShowQuickSync] = useState(false);
 
   useEffect(() => {
     Promise.resolve().then(() => {
@@ -133,7 +135,7 @@ export default function Sidebar() {
         <div className="sidebar-header">
           <div className="sidebar-brand">
             <span className="sidebar-logo">
-              <img src="/KELIN LOGO-01.png" alt="KGS Logo" style={{ width: '38px', marginLeft: '4px' }} />
+              <img src="/kelin-logo.png" alt="KGS Logo" style={{ width: '38px', marginLeft: '4px' }} crossOrigin="anonymous" />
             </span>
             {!isCollapsed && <span>KGS PURCHASE</span>}
           </div>
@@ -193,6 +195,28 @@ export default function Sidebar() {
         <div className="sidebar-footer">
           <button
             className="sidebar-logout"
+            onClick={() => setShowQuickSync(true)}
+            title={isCollapsed ? "Quick Sync" : ""}
+            style={{ 
+              padding: isCollapsed ? '0.7rem 0' : '0.7rem 1rem', 
+              justifyContent: isCollapsed ? 'center' : 'flex-start',
+              marginBottom: '0.5rem',
+              background: 'rgba(59, 130, 246, 0.1)',
+              color: '#60a5fa',
+              border: '1px solid rgba(59, 130, 246, 0.2)'
+            }}
+          >
+            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M21 12a9 9 0 0 0-9-9 9.75 9.75 0 0 0-6.74 2.74L3 8" />
+              <path d="M3 3v5h5" />
+              <path d="M3 12a9 9 0 0 0 9 9 9.75 9.75 0 0 0 6.74-2.74L21 16" />
+              <path d="M16 16h5v5" />
+            </svg>
+            {!isCollapsed && <span style={{ marginLeft: '0.75rem' }}>Quick Sync</span>}
+          </button>
+
+          <button
+            className="sidebar-logout"
             onClick={() => {
               // Clear user info
               localStorage.removeItem("userName");
@@ -219,6 +243,11 @@ export default function Sidebar() {
           </button>
         </div>
       </aside>
+
+      <QuickSyncModal 
+        isOpen={showQuickSync} 
+        onClose={() => setShowQuickSync(false)} 
+      />
     </>
   );
 }

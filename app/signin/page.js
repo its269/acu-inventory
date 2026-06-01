@@ -112,6 +112,7 @@ export default function SignInPage() {
                             src="/kelin-logo.png"
                             alt="Kelin Logo"
                             className="signin-logo-img"
+                            crossOrigin="anonymous"
                         />
                     </div>
                     <h1 className="signin-title">KGS PURCHASING</h1>
