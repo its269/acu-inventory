@@ -110,6 +110,9 @@ export default function InventoryDetailModal({ inventoryId, onClose }) {
                                 {detail.source === "acumatica" && (
                                     <span className="idm-source idm-source-live">● Live from Acumatica</span>
                                 )}
+                                {detail.source === "mysql" && (
+                                    <span className="idm-source idm-source-live" style={{ color: '#10b981', background: '#ecfdf5', borderColor: '#a7f3d0' }}>● Live from MySQL</span>
+                                )}
                                 {detail.source === "supabase" && (
                                     <span className="idm-source idm-source-cache">● From local database</span>
                                 )}
@@ -124,7 +127,7 @@ export default function InventoryDetailModal({ inventoryId, onClose }) {
                             <div className="idm-card">
                                 <span className="idm-card-label">Total On Hand</span>
                                 <div className="idm-card-value-group">
-                                    <span className="idm-card-value">{Number(detail.totalOnHand).toLocaleString()}</span>
+                                    <span className="idm-card-value">{(Number(detail.totalOnHand) || 0).toLocaleString()}</span>
                                     {totalStatus && (
                                         <span className={`idm-status-pill ${totalStatus.cls}`}>{totalStatus.label}</span>
                                     )}
@@ -133,14 +136,14 @@ export default function InventoryDetailModal({ inventoryId, onClose }) {
                             <div className="idm-card">
                                 <span className="idm-card-label">Total Available</span>
                                 <div className="idm-card-value-group">
-                                    <span className="idm-card-value">{Number(detail.totalAvailable).toLocaleString()}</span>
+                                    <span className="idm-card-value">{(Number(detail.totalAvailable) || 0).toLocaleString()}</span>
                                     <span className="idm-card-label" style={{ fontSize: '0.6rem', color: '#94a3b8' }}>Units</span>
                                 </div>
                             </div>
                             <div className="idm-card">
                                 <span className="idm-card-label">Unit Price</span>
                                 <div className="idm-card-value-group">
-                                    <span className="idm-card-value">₱{Number(detail.unitPrice).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                                    <span className="idm-card-value">₱{(Number(detail.unitPrice) || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
                                 </div>
                             </div>
                             <div className="idm-card">

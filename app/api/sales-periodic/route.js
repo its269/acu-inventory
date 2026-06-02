@@ -1,5 +1,5 @@
 import { AcumaticaService } from "@/services/acumatica";
-import { supabaseAdmin as supabase } from "@/lib/supabase";
+import { MySqlService } from "@/services/mysql";
 import { NextResponse } from "next/server";
 import { getSession } from "@/lib/session-store";
 
@@ -27,7 +27,7 @@ export async function GET(request) {
     try {
         const { searchParams } = new URL(request.url);
         const branch = searchParams.get("branch") || "";
-        const targetMonth = parseInt(searchParams.get("month")); 
+        const targetMonth = parseInt(searchParams.get("month"));
         const targetYear = parseInt(searchParams.get("year"));
         const page = parseInt(searchParams.get("page") || "1");
         const pageSize = parseInt(searchParams.get("pageSize") || "15");
@@ -40,25 +40,13 @@ export async function GET(request) {
         const cookie = getSession(sessionId);
         if (!cookie) return NextResponse.json({ message: "Unauthorized" }, { status: 401 });
 
-        // 1. Calculate the target 3 months AND pre-populate month map to avoid duplicates
+        // 1. Calculate the target 3 months
         const targetMonths = [];
-        const monthMap = new Map();
         for (let i = 0; i < 3; i++) {
             const d = new Date(targetYear, targetMonth - 1 + i, 1);
             if (d > new Date()) break;
-            const m = d.getMonth() + 1;
-            const y = d.getFullYear();
-            const key = `${y}${String(m).padStart(2, '0')}`; // Standardized YYYYMM key
-            
-            targetMonths.push({ month: m, year: y });
-            monthMap.set(key, {
-                key,
-                label: d.toLocaleString('default', { month: 'short', year: 'numeric' }).toUpperCase(),
-                date: d
-            });
+            targetMonths.push({ month: d.getMonth() + 1, year: d.getFullYear() });
         }
-
-        const sortedMonths = Array.from(monthMap.values()).sort((a, b) => a.date - b.date);
 
         // 2. Fetch Data from Acumatica
         const rawInvoices = await AcumaticaService.fetchSalesBySpecificMonths({
@@ -78,28 +66,51 @@ export async function GET(request) {
         const invoices = Array.from(invoiceMap.values());
         console.log(`>>> [Sales API] De-duplicated from ${rawInvoices.length} to ${invoices.length} unique records.`);
 
+        // 3. Discover months from actual data to build headers
+        const monthMap = new Map();
+        for (const inv of invoices) {
+            let pKey = getAny(inv, "PostPeriod", "FinancialPeriod", "Period");
+            const dateStr = getAny(inv, "Date", "DocumentDate");
+
+            if (!pKey && dateStr) {
+                const d = new Date(dateStr);
+                pKey = `${String(d.getMonth() + 1).padStart(2, '0')}${d.getFullYear()}`;
+            }
+
+            if (!pKey) continue;
+
+            if (!monthMap.has(pKey)) {
+                const d = new Date(dateStr);
+                monthMap.set(pKey, {
+                    key: pKey,
+                    label: d.toLocaleString('default', { month: 'short', year: 'numeric' }),
+                    date: d
+                });
+            }
+        }
+
+        const sortedMonths = Array.from(monthMap.values()).sort((a, b) => a.date - b.date);
+
         // 4. Aggregate
         const grouped = {};
-        const { data: catalog } = await supabase.from("products").select("inventory_id,item_class,description");
-        const productMap = new Map((catalog || []).map(p => [p.inventory_id.toUpperCase().trim(), p]));
+        const catalogRows = await MySqlService.getProductCatalog();
+        const productMap = new Map((catalogRows || []).map(p => [p.inventory_id.toUpperCase().trim(), p]));
 
         let totalRevenue = 0;
         let totalQtySold = 0;
 
         for (const inv of invoices) {
-            // Normalize pKey using Date (most reliable across all entities)
+            let pKey = getAny(inv, "PostPeriod", "FinancialPeriod", "Period");
             const dateStr = getAny(inv, "Date", "DocumentDate");
-            if (!dateStr) continue;
-            
-            const d = new Date(dateStr);
-            const pKey = `${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, '0')}`;
 
-            // Skip if not in our target window (though Acumatica filter should handle this)
-            if (!monthMap.has(pKey)) continue;
+            if (!pKey && dateStr) {
+                const d = new Date(dateStr);
+                pKey = `${String(d.getMonth() + 1).padStart(2, '0')}${d.getFullYear()}`;
+            }
 
             const invType = String(getAny(inv, "Type", "DocumentType")).trim();
             const isReturn = invType === "Credit Memo" || invType === "Return" || invType === "Credit Adj.";
-            
+
             // PRESENTATION MODE: Treat everything as positive Gross Sales
             // if (isReturn) continue; 
 
@@ -112,7 +123,7 @@ export async function GET(request) {
                 if (!invId) continue;
 
                 const lBranch = String(getAny(line, "BranchID", "Branch", "WarehouseID", "SiteID") || hBranch || "").trim();
-                
+
                 if (branch && branch !== "All Branches") {
                     const bTarget = branch.toLowerCase();
                     const bActual = lBranch.toLowerCase();
@@ -157,11 +168,8 @@ export async function GET(request) {
         // Overall stocks
         let overallStocks = 0;
         try {
-            const sQuery = supabase.from("warehouse_stock").select("on_hand");
-            if (branch && branch !== "All Branches") sQuery.eq("warehouse_id", branch);
-            const { data: sData } = await sQuery;
-            overallStocks = (sData || []).reduce((sum, item) => sum + (item.on_hand || 0), 0);
-        } catch (e) {}
+            overallStocks = await MySqlService.getOverallStocks(branch);
+        } catch (e) { }
 
         const finalResults = Object.values(grouped).sort((a, b) => b.totalSales - a.totalSales);
 
@@ -169,9 +177,9 @@ export async function GET(request) {
             data: finalResults, // Return EVERYTHING for client-side pagination
             months: sortedMonths.map(m => ({ key: m.key, label: m.label })),
             metrics: { overallStocks, totalRevenue, uniqueProducts: finalResults.length, totalQtySold },
-            pagination: { 
-                totalItems: finalResults.length, 
-                totalPages: Math.ceil(finalResults.length / pageSize) 
+            pagination: {
+                totalItems: finalResults.length,
+                totalPages: Math.ceil(finalResults.length / pageSize)
             }
         });
 

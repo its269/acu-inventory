@@ -1,4 +1,4 @@
-import { SupabaseService } from "@/services/supabase";
+import { MySqlService } from "@/services/mysql";
 import { AcumaticaService } from "@/services/acumatica";
 import { getSession } from "@/lib/session-store";
 import { NextResponse } from "next/server";
@@ -21,21 +21,19 @@ export async function GET(request, { params }) {
         const { inventoryId: rawId } = await params;
         const inventoryId = decodeURIComponent(rawId);
 
-        // --- Try Supabase first ---
-        const detail = await SupabaseService.getProductStockDetail(inventoryId);
-
-        // Only trust Supabase if it has branch rows with actual quantities
-        const hasRealData = detail.branches.length > 0 && detail.branches.some(b => b.onHand > 0 || b.available > 0);
-        if (hasRealData) {
-            return NextResponse.json({ ...detail, source: "supabase" });
+        // --- Try MySQL first ---
+        console.log(`[Stock Item Detail API] Fetching from MySQL for ${inventoryId}`);
+        const mysqlDetail = await MySqlService.getStockItemDetail(inventoryId);
+        if (mysqlDetail) {
+            return NextResponse.json({ ...mysqlDetail, source: "mysql" });
         }
 
         // --- Fallback: fetch live from Acumatica ---
         const sessionId = request.cookies.get("acu_session")?.value;
         const cookie = getSession(sessionId);
         if (!cookie) {
-            // No session — return Supabase partial data (product metadata only, no branches)
-            return NextResponse.json({ ...detail, source: "supabase", notice: "No active session for live branch data" });
+            // No session and no MySQL data
+            return NextResponse.json({ error: "Item not found in local database and no active ERP session" }, { status: 404 });
         }
 
         const url = `${ACU_BASE}/StockItem?$filter=InventoryID eq '${encodeURIComponent(inventoryId)}'&$expand=WarehouseDetails`;
@@ -45,7 +43,7 @@ export async function GET(request, { params }) {
         const item = items[0];
 
         if (!item) {
-            return NextResponse.json({ ...detail, source: "acumatica_notfound" });
+            return NextResponse.json({ error: "Item not found in local database or Acumatica ERP" }, { status: 404 });
         }
 
         const wds = item.WarehouseDetails || [];
@@ -64,11 +62,11 @@ export async function GET(request, { params }) {
 
         return NextResponse.json({
             inventoryId,
-            description: String(getF(item, "Description")).trim() || detail.description,
-            itemClass: String(getF(item, "ItemClass")).trim() || detail.itemClass,
-            unitPrice: Number(getF(item, "DefaultPrice") || detail.unitPrice),
-            itemStatus: String(getF(item, "ItemStatus")).trim() || detail.itemStatus,
-            baseUnit: String(getF(item, "BaseUnit")).trim() || detail.baseUnit,
+            description: String(getF(item, "Description")).trim(),
+            itemClass: String(getF(item, "ItemClass")).trim(),
+            unitPrice: Number(getF(item, "DefaultPrice") || 0),
+            itemStatus: String(getF(item, "ItemStatus")).trim(),
+            baseUnit: String(getF(item, "BaseUnit")).trim(),
             lastSync: null,
             totalOnHand,
             totalAvailable,

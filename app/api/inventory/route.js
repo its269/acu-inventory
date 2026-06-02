@@ -1,12 +1,12 @@
 import { AcumaticaService } from "@/services/acumatica";
-import { SupabaseService } from "@/services/supabase";
+import { MySqlService } from "@/services/mysql";
 import { getSession } from "@/lib/session-store";
 
 export const runtime = "nodejs";
 
 /**
  * BFF API Route for Inventory
- * Handles request parsing and delegates to AcumaticaService or SupabaseService.
+ * Handles request parsing and delegates to AcumaticaService or MySqlService.
  */
 export async function GET(request) {
     try {
@@ -18,31 +18,30 @@ export async function GET(request) {
         const branch = searchParams.get("branch") || "";
         const stats = searchParams.get("stats") === "true";
         const count = searchParams.get("count") === "true";
-        const source = searchParams.get("source") || "supabase"; // Default to supabase for speed
+        const source = searchParams.get("source") || "mysql"; // Default to mysql for speed
 
         let result;
 
-        if (source === "supabase") {
-            console.log("[BFF] Fetching from Supabase...");
+        if (source === "mysql") {
+            console.log("[BFF] Fetching from MySQL...");
             try {
-                const inventory = await SupabaseService.getInventory({ page, pageSize, search, branch });
+                const inventory = await MySqlService.getInventory({ page, pageSize, search, branch });
                 
                 let globalStats = { totalValue: 0, lowStock: 0, outOfStock: 0 };
                 if (stats) {
-                    globalStats = await SupabaseService.getGlobalStats(branch, search);
+                    globalStats = await MySqlService.getGlobalStats(branch, search);
                 }
 
                 result = {
                     ...inventory,
                     globalStats,
-                    source: "supabase"
+                    source: "mysql"
                 };
-            } catch (sError) {
-                console.error("[Supabase Inventory Error]", sError);
+            } catch (mError) {
+                console.error("[MySQL Inventory Error]", mError);
                 return Response.json({ 
-                    message: "Supabase query failed", 
-                    details: sError.message,
-                    hint: "Did you run the SQL script in Supabase Editor?"
+                    message: "MySQL query failed", 
+                    details: mError.message
                 }, { status: 500 });
             }
         } else {

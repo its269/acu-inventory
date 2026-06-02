@@ -1,4 +1,4 @@
-import { SupabaseService } from "@/services/supabase";
+import { MySqlService } from "@/services/mysql";
 import { NextResponse } from "next/server";
 
 export async function GET(request) {
@@ -8,10 +8,11 @@ export async function GET(request) {
         const pageSize = Math.min(100, Math.max(1, parseInt(searchParams.get("pageSize") || "50", 10)));
         const search = searchParams.get("search") || "";
 
-        const result = await SupabaseService.getProducts({ page, pageSize, search });
+        console.log(`[Stock Items API] Fetching from MySQL - Page: ${page}, Size: ${pageSize}, Search: "${search}"`);
+        const result = await MySqlService.getStockItems({ page, pageSize, search });
         return NextResponse.json(result);
     } catch (err) {
         console.error("[Stock Items API Error]", err);
-        return NextResponse.json({ error: err.message || "Failed to fetch stock items" }, { status: 500 });
+        return NextResponse.json({ error: err.message || "Failed to fetch stock items from MySQL" }, { status: 500 });
     }
 }

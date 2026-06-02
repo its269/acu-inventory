@@ -1,25 +1,16 @@
 import { AcumaticaService } from "@/services/acumatica";
-import { supabase } from "@/lib/supabase";
+import { MySqlService } from "@/services/mysql";
 import { NextResponse } from "next/server";
 import { getSession } from "@/lib/session-store";
 
 export async function GET(request) {
     try {
         const { searchParams } = new URL(request.url);
-        const source = searchParams.get("source") || "supabase";
+        const source = searchParams.get("source") || "mysql";
 
-        if (source === "supabase") {
-            const { data, error } = await supabase.from('branches').select('*').order('branch_name');
-            if (error) {
-                console.error("[Supabase Branches Error]", error);
-                return NextResponse.json({ message: "Supabase error", details: error.message }, { status: 500 });
-            }
-            
-            // Map to Acumatica-like structure for frontend compatibility
-            return NextResponse.json((data || []).map(b => ({
-                SiteID: b.branch_id,
-                Description: { value: b.branch_name }
-            })));
+        if (source === "mysql") {
+            const branches = await MySqlService.getBranches();
+            return NextResponse.json(branches);
         }
 
         const sessionId = request.cookies.get("acu_session")?.value;

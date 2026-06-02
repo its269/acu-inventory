@@ -152,7 +152,7 @@ export default function DashboardPage() {
                 branch: b, 
                 count: "true", 
                 stats: "true", 
-                source: "supabase" 
+                source: "mysql" 
             });
             const cached = DataCache.get(`inventory_${params.toString()}`);
             if (cached) {
@@ -210,7 +210,7 @@ export default function DashboardPage() {
     const fetchInventory = useCallback(async (isBackground = false) => {
         if (!isBackground) setLoading(true);
         try {
-            const dataParams = new URLSearchParams({ page: String(page), pageSize: String(ROWS_PER_PAGE), search: debouncedSearch, branch: selectedBranch, count: "true", stats: "true", source: "supabase" });
+            const dataParams = new URLSearchParams({ page: String(page), pageSize: String(ROWS_PER_PAGE), search: debouncedSearch, branch: selectedBranch, count: "true", stats: "true", source: "mysql" });
             const cacheKey = `inventory_${dataParams.toString()}`;
 
             const res = await fetch(`/api/inventory?${dataParams.toString()}`);
@@ -237,7 +237,7 @@ export default function DashboardPage() {
     }, [search]);
 
     useEffect(() => {
-        const dataParams = new URLSearchParams({ page: String(page), pageSize: String(ROWS_PER_PAGE), search: debouncedSearch, branch: selectedBranch, count: "true", stats: "true", source: "supabase" });
+        const dataParams = new URLSearchParams({ page: String(page), pageSize: String(ROWS_PER_PAGE), search: debouncedSearch, branch: selectedBranch, count: "true", stats: "true", source: "mysql" });
         const cacheKey = `inventory_${dataParams.toString()}`;
 
         const cached = DataCache.get(cacheKey);
