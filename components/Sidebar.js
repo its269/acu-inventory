@@ -52,6 +52,7 @@ export default function Sidebar() {
   const [isOpen, setIsOpen] = useState(false);
   const [isCollapsed, setIsCollapsed] = useState(false);
   const [showQuickSync, setShowQuickSync] = useState(false);
+  const [syncStatus, setSyncStatus] = useState("idle"); // idle | syncing | complete | error
 
   useEffect(() => {
     Promise.resolve().then(() => {
@@ -197,22 +198,40 @@ export default function Sidebar() {
             className="sidebar-logout"
             onClick={() => setShowQuickSync(true)}
             title={isCollapsed ? "Quick Sync" : ""}
-            style={{ 
-              padding: isCollapsed ? '0.7rem 0' : '0.7rem 1rem', 
+            style={{
+              padding: isCollapsed ? '0.7rem 0' : '0.7rem 1rem',
               justifyContent: isCollapsed ? 'center' : 'flex-start',
               marginBottom: '0.5rem',
               background: 'rgba(59, 130, 246, 0.1)',
               color: '#60a5fa',
-              border: '1px solid rgba(59, 130, 246, 0.2)'
+              border: '1px solid rgba(59, 130, 246, 0.2)',
+              position: 'relative',
             }}
           >
-            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"
+              style={{ animation: syncStatus === 'syncing' ? 'spin 1.2s linear infinite' : 'none' }}>
               <path d="M21 12a9 9 0 0 0-9-9 9.75 9.75 0 0 0-6.74 2.74L3 8" />
               <path d="M3 3v5h5" />
               <path d="M3 12a9 9 0 0 0 9 9 9.75 9.75 0 0 0 6.74-2.74L21 16" />
               <path d="M16 16h5v5" />
             </svg>
             {!isCollapsed && <span style={{ marginLeft: '0.75rem' }}>Quick Sync</span>}
+            {/* Status dot — always visible even when collapsed */}
+            <span style={{
+              position: 'absolute',
+              top: '6px',
+              right: isCollapsed ? '6px' : '8px',
+              width: '8px',
+              height: '8px',
+              borderRadius: '50%',
+              background: syncStatus === 'complete' ? '#22c55e'
+                : syncStatus === 'error' ? '#ef4444'
+                  : syncStatus === 'syncing' ? '#f59e0b'
+                    : '#475569',
+              boxShadow: syncStatus === 'syncing' ? '0 0 0 3px rgba(245,158,11,0.3)' : 'none',
+              animation: syncStatus === 'syncing' ? 'pulse-dot 1.5s ease-in-out infinite' : 'none',
+              display: 'block',
+            }} />
           </button>
 
           <button
@@ -244,10 +263,22 @@ export default function Sidebar() {
         </div>
       </aside>
 
-      <QuickSyncModal 
-        isOpen={showQuickSync} 
-        onClose={() => setShowQuickSync(false)} 
+      <QuickSyncModal
+        isOpen={showQuickSync}
+        onClose={() => setShowQuickSync(false)}
+        onStatusChange={setSyncStatus}
       />
+
+      <style jsx>{`
+        @keyframes spin {
+          from { transform: rotate(0deg); }
+          to   { transform: rotate(360deg); }
+        }
+        @keyframes pulse-dot {
+          0%, 100% { opacity: 1; transform: scale(1); }
+          50%       { opacity: 0.5; transform: scale(1.4); }
+        }
+      `}</style>
     </>
   );
 }

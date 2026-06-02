@@ -93,6 +93,8 @@ const InventoryRow = memo(({ row, index }) => {
     const available = Number(row.Available?.value) || 0;
     const status = getStatus(onHand);
     const price = Number(row.DefaultPrice?.value) || 0;
+    const qtySold = Number(row.QtySold?.value) || 0;
+    const totalSales = Number(row.TotalSales?.value) || 0;
 
     return (
         <tr
@@ -108,6 +110,8 @@ const InventoryRow = memo(({ row, index }) => {
             <td className="db-num">₱{price.toLocaleString("en-PH", { minimumFractionDigits: 2 })}</td>
             <td><span className="db-class-tag">{cellVal(row, "ItemClass")}</span></td>
             <td><span className={`db-status-badge ${STATUS_CLASS[status]}`}>{STATUS_LABEL[status]}</span></td>
+            <td className="db-num">{qtySold > 0 ? qtySold.toLocaleString("en-PH", { minimumFractionDigits: 2 }) : "—"}</td>
+            <td className="db-num">{totalSales > 0 ? `₱${totalSales.toLocaleString("en-PH", { minimumFractionDigits: 2 })}` : "—"}</td>
         </tr>
     );
 });
@@ -145,14 +149,14 @@ export default function DashboardPage() {
             if (p > 1) setPage(p);
             if (u !== "User") setUserName(u);
 
-            const params = new URLSearchParams({ 
-                page: String(p), 
-                pageSize: String(ROWS_PER_PAGE), 
-                search: s, 
-                branch: b, 
-                count: "true", 
-                stats: "true", 
-                source: "mysql" 
+            const params = new URLSearchParams({
+                page: String(p),
+                pageSize: String(ROWS_PER_PAGE),
+                search: s,
+                branch: b,
+                count: "true",
+                stats: "true",
+                source: "mysql"
             });
             const cached = DataCache.get(`inventory_${params.toString()}`);
             if (cached) {
@@ -180,10 +184,13 @@ export default function DashboardPage() {
         const fetchBranches = async () => {
             const cacheKey = "branches";
             const cached = DataCache.get(cacheKey);
-            if (cached) {
+            // Guard: only use cache if it's already the {id,name} format
+            if (cached && Array.isArray(cached) && cached.length > 0 && typeof cached[0] === "object" && cached[0].id) {
                 setBranchOptions(cached);
-                const mainBranch = cached.find(n => n.toUpperCase() === "MAIN") || cached.find(n => n.toUpperCase().includes("MAIN"));
-                if (mainBranch && !selectedBranch) setSelectedBranch(mainBranch);
+                if (!selectedBranch) {
+                    const main = cached.find(b => b.id.toUpperCase() === "MAIN") || cached.find(b => b.id.toUpperCase().includes("MAIN"));
+                    if (main) setSelectedBranch(main.id);
+                }
             }
 
             try {
@@ -191,14 +198,21 @@ export default function DashboardPage() {
                 if (res.ok) {
                     const data = await res.json();
                     const list = Array.isArray(data) ? data : (data?.value || []);
-                    const names = list.map((b) => b.SiteID || b.BranchName?.value).filter(Boolean);
-                    const unique = [...new Set(names)].sort();
-                    setBranchOptions(unique);
-                    DataCache.set(cacheKey, unique);
+                    const options = list
+                        .map(b => {
+                            const rawName = b.Description?.value || b.BranchName?.value || b.branch_name || "";
+                            const name = rawName && !rawName.startsWith("[object") ? rawName : (b.SiteID || b.branch_id || "");
+                            return { id: b.SiteID || b.branch_id || "", name };
+                        })
+                        .filter(b => b.id)
+                        .filter((b, i, arr) => arr.findIndex(x => x.id === b.id) === i)
+                        .sort((a, z) => a.name.localeCompare(z.name));
+                    setBranchOptions(options);
+                    DataCache.set(cacheKey, options);
 
                     if (!selectedBranch) {
-                        const mainBranch = unique.find(n => n.toUpperCase() === "MAIN") || unique.find(n => n.toUpperCase().includes("MAIN"));
-                        if (mainBranch) setSelectedBranch(mainBranch);
+                        const main = options.find(b => b.id.toUpperCase() === "MAIN") || options.find(b => b.id.toUpperCase().includes("MAIN"));
+                        if (main) setSelectedBranch(main.id);
                     }
                 }
             } catch (err) { console.error("Branch fetch error", err); }
@@ -255,6 +269,12 @@ export default function DashboardPage() {
         return userName.slice(0, 2).toUpperCase();
     }, [userName]);
 
+    const selectedBranchName = useMemo(() => {
+        if (!selectedBranch) return "All Branches";
+        const found = branchOptions.find(b => b.id === selectedBranch);
+        return found ? found.name : selectedBranch;
+    }, [selectedBranch, branchOptions]);
+
     /* ── Render ───────────────────────────────────────────── */
     return (
         <div className="db-root">
@@ -293,7 +313,7 @@ export default function DashboardPage() {
                             <IconFilter />
                             <select className="db-select" value={selectedBranch} onChange={(e) => { setSelectedBranch(e.target.value); setPage(1); }}>
                                 <option value="">All Branches</option>
-                                {branchOptions.map(b => <option key={b} value={b}>{b}</option>)}
+                                {branchOptions.map(b => <option key={b.id} value={b.id}>{b.id}</option>)}
                             </select>
                             <IconChevron />
                         </div>
@@ -324,6 +344,8 @@ export default function DashboardPage() {
                                     <th className="db-num">Price</th>
                                     <th>Class</th>
                                     <th>Status</th>
+                                    <th className="db-num">Qty Sold</th>
+                                    <th className="db-num">Total Sales</th>
                                 </tr>
                             </thead>
                             <tbody>

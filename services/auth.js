@@ -1,6 +1,8 @@
-const AUTH_BASE = "https://accounting.holocrontrackertrading.com/ERP/entity/auth";
+const ACU_HOST = "https://accounting.holocrontrackertrading.com";
+const AUTH_BASE = `${ACU_HOST}/ERP/entity/auth`;
 const AUTH_URL = `${AUTH_BASE}/login`;
 const LOGOUT_URL = `${AUTH_BASE}/logout`;
+const TOKEN_URL = `${ACU_HOST}/identity/connect/token`;
 const COMMON_HEADERS = {
     "Accept": "application/json",
     "Content-Type": "application/json",
@@ -19,6 +21,37 @@ function parseAcuError(raw) {
 }
 
 export const AuthService = {
+    /**
+     * OAuth2 Resource Owner Password flow → returns a Bearer token object.
+     * { access_token, refresh_token, expires_in, token_type }
+     */
+    async loginWithToken({ username, password, company }) {
+        const body = new URLSearchParams({
+            grant_type: "password",
+            client_id: "frontend",
+            client_secret: "",
+            username,
+            password,
+            scope: "api",
+            ...(company ? { acumatica_company: company } : {}),
+        });
+
+        const res = await fetch(TOKEN_URL, {
+            method: "POST",
+            headers: { "Content-Type": "application/x-www-form-urlencoded" },
+            body: body.toString(),
+        });
+
+        if (!res.ok) {
+            const raw = await res.text().catch(() => "Token request failed");
+            throw new Error(parseAcuError(raw));
+        }
+
+        const data = await res.json();
+        if (!data.access_token) throw new Error("No access_token in response");
+        return data; // { access_token, refresh_token, expires_in, token_type }
+    },
+
     async login({ username, password, company }) {
         // Attempt to release any lingering Acumatica API session before logging in.
         // This helps avoid "API Login Limit" errors caused by sessions not being

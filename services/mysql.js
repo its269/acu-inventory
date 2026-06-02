@@ -11,6 +11,17 @@ const pool = mysql.createPool({
     queueLimit: 0,
 });
 
+const purchasePool = mysql.createPool({
+    host: process.env.MYSQL_HOST,
+    port: parseInt(process.env.MYSQL_PORT || "3306", 10),
+    user: process.env.MYSQL_USER,
+    password: process.env.MYSQL_PASSWORD,
+    database: process.env.MYSQL_PURCHASE_DATABASE || "db_purchase",
+    waitForConnections: true,
+    connectionLimit: 10,
+    queueLimit: 0,
+});
+
 export const MySqlService = {
     /**
      * Fetch inventory with pagination, search, and branch filtering (for Dashboard)
@@ -19,20 +30,15 @@ export const MySqlService = {
         const offset = (page - 1) * pageSize;
 
         try {
-            let whereClauses = [];
+            let whereClauses = ["default_warehouse IS NOT NULL", "default_warehouse != '__catalog__'"];
             let params = [];
-
-            if (branch) {
-                whereClauses.push("default_warehouse = ?");
-                params.push(branch);
-            }
 
             if (search) {
                 whereClauses.push("(inventory_id LIKE ? OR inventory_name LIKE ?)");
                 params.push(`%${search}%`, `%${search}%`);
             }
 
-            const wherePart = whereClauses.length > 0 ? `WHERE ${whereClauses.join(" AND ")}` : "";
+            const wherePart = `WHERE ${whereClauses.join(" AND ")}`;
 
             const limitInt = parseInt(pageSize, 10);
             const offsetInt = parseInt(offset, 10);
@@ -44,8 +50,8 @@ export const MySqlService = {
                     item_class as ItemClass, 
                     default_warehouse as Branch, 
                     default_warehouse as SiteID, 
-                    0 as OnHand, 
-                    0 as Available, 
+                    COALESCE(on_hand, 0) as OnHand, 
+                    COALESCE(available, 0) as Available, 
                     default_price as DefaultPrice 
                  FROM inventory_items 
                  ${wherePart} 
@@ -87,7 +93,7 @@ export const MySqlService = {
      */
     async getGlobalStats(branch = "", search = "") {
         try {
-            let whereClauses = [];
+            let whereClauses = ["default_warehouse IS NOT NULL", "default_warehouse != '__catalog__'"];
             let params = [];
 
             if (branch) {
@@ -100,18 +106,23 @@ export const MySqlService = {
                 params.push(`%${search}%`, `%${search}%`);
             }
 
-            const wherePart = whereClauses.length > 0 ? `WHERE ${whereClauses.join(" AND ")}` : "";
+            const wherePart = `WHERE ${whereClauses.join(" AND ")}`;
 
-            const [[{ count }]] = await pool.execute(
-                `SELECT COUNT(*) as count FROM inventory_items ${wherePart}`,
+            const [[stats]] = await pool.query(
+                `SELECT
+                    COUNT(*) as total,
+                    SUM(COALESCE(on_hand, 0) * COALESCE(default_price, 0)) as totalValue,
+                    SUM(CASE WHEN on_hand > 0 AND on_hand < 10 THEN 1 ELSE 0 END) as lowStock,
+                    SUM(CASE WHEN on_hand <= 0 THEN 1 ELSE 0 END) as outOfStock
+                 FROM inventory_items ${wherePart}`,
                 params
             );
 
             return {
-                totalValue: 0,
-                lowStock: 0,
-                outOfStock: 0,
-                count
+                totalValue: Number(stats.totalValue) || 0,
+                lowStock: Number(stats.lowStock) || 0,
+                outOfStock: Number(stats.outOfStock) || 0,
+                count: Number(stats.total) || 0
             };
         } catch (err) {
             console.error("[MySQL getGlobalStats Error]", err);
@@ -221,7 +232,7 @@ export const MySqlService = {
     async getBranches() {
         try {
             const [rows] = await pool.execute(
-                `SELECT DISTINCT default_warehouse FROM inventory_items WHERE default_warehouse IS NOT NULL AND default_warehouse != '' ORDER BY default_warehouse ASC`
+                `SELECT DISTINCT default_warehouse FROM inventory_items WHERE default_warehouse IS NOT NULL AND default_warehouse != '' AND default_warehouse != '__catalog__' ORDER BY default_warehouse ASC`
             );
 
             return rows.map(r => ({
@@ -284,46 +295,57 @@ export const MySqlService = {
     },
 
     /**
-     * Bulk upsert products into inventory_items
-     * Note: In this schema, inventory_items seems to hold everything.
+     * Bulk-update catalog fields on existing inventory_items rows.
+     * Uses INSERT ... ON DUPLICATE KEY UPDATE so a single SQL statement handles
+     * the whole batch — avoids row-by-row UPDATE timeouts on large catalogs.
+     * default_warehouse is set to '' as a placeholder; the UNIQUE KEY
+     * (inventory_id, default_warehouse) means this won't conflict with real
+     * warehouse rows, and existing rows keep their real default_warehouse.
      */
     async upsertInventoryItems(items) {
         if (!items.length) return;
+        const CHUNK = 200;
+        const now = new Date();
+        const safeNum = (v) => { const n = Number(v); return (isNaN(n) ? null : n); };
         const connection = await pool.getConnection();
         try {
             await connection.beginTransaction();
-            for (const item of items) {
-                // Since inventory_items might be per branch, we need to be careful with primary keys.
-                // If it's a flat catalog, we use inventory_id. 
-                // If it's levels, we use inventory_id + branch_id + site_id.
-                // I'll assume inventory_id is the key for now, or just do a general update.
-
-                await connection.execute(
-                    `INSERT INTO inventory_items 
-                        (inventory_id, description, item_class, default_price, item_status, base_unit, last_sync) 
-                     VALUES (?, ?, ?, ?, ?, ?, ?) 
-                     ON DUPLICATE KEY UPDATE 
-                        description = VALUES(description), 
-                        item_class = VALUES(item_class), 
-                        default_price = VALUES(default_price),
-                        item_status = VALUES(item_status),
-                        base_unit = VALUES(base_unit),
-                        last_sync = VALUES(last_sync)`,
-                    [
-                        item.inventory_id,
-                        item.description,
-                        item.item_class,
-                        item.default_price,
-                        item.item_status,
-                        item.base_unit,
-                        new Date()
-                    ]
+            for (let i = 0; i < items.length; i += CHUNK) {
+                const chunk = items.slice(i, i + CHUNK);
+                const placeholders = chunk.map(() => '(?,?,?,?,?,?,?,?,?,?)').join(',');
+                const values = chunk.flatMap(item => [
+                    item.inventory_id,
+                    '__catalog__',          // sentinel warehouse — never shown
+                    item.description,
+                    item.item_class,
+                    safeNum(item.default_price),
+                    item.item_status || 'active',
+                    item.base_unit || '',
+                    item.item_type || '',
+                    item.posting_class || '',
+                    now,
+                ]);
+                await connection.query(
+                    `INSERT INTO inventory_items
+                        (inventory_id, default_warehouse, inventory_name, item_class,
+                         default_price, item_status, base_unit, type, posting_class, last_sync)
+                     VALUES ${placeholders}
+                     ON DUPLICATE KEY UPDATE
+                        inventory_name = VALUES(inventory_name),
+                        item_class     = VALUES(item_class),
+                        default_price  = VALUES(default_price),
+                        item_status    = VALUES(item_status),
+                        base_unit      = VALUES(base_unit),
+                        type           = COALESCE(NULLIF(VALUES(type),''), type),
+                        posting_class  = COALESCE(NULLIF(VALUES(posting_class),''), posting_class),
+                        last_sync      = VALUES(last_sync)`,
+                    values
                 );
             }
             await connection.commit();
         } catch (err) {
             await connection.rollback();
-            console.error("[MySQL upsertInventoryItems Error]", err);
+            console.error('[MySQL upsertInventoryItems Error]', err);
             throw err;
         } finally {
             connection.release();
@@ -331,32 +353,166 @@ export const MySqlService = {
     },
 
     /**
-     * Upsert inventory levels
+     * Bulk upsert inventory levels — INSERT new rows or UPDATE on_hand/available
+     * on existing rows via uq_inv_warehouse (inventory_id, default_warehouse).
+     * Uses chunked multi-row INSERT for performance.
      */
     async upsertInventoryLevels(levels) {
         if (!levels.length) return;
+        const CHUNK = 200;
+        const now = new Date();
+        const safeNum = (v) => { const n = Number(v); return (isNaN(n) ? null : n); };
         const connection = await pool.getConnection();
         try {
             await connection.beginTransaction();
-            for (const l of levels) {
-                await connection.execute(
-                    `INSERT INTO inventory_items 
-                        (inventory_id, branch_id, site_id, on_hand, available, last_sync) 
-                     VALUES (?, ?, ?, ?, ?, ?) 
-                     ON DUPLICATE KEY UPDATE 
-                        on_hand = VALUES(on_hand), 
-                        available = VALUES(available),
-                        last_sync = VALUES(last_sync)`,
-                    [l.inventory_id, l.branch_id, l.site_id, l.on_hand, l.available, new Date()]
+            for (let i = 0; i < levels.length; i += CHUNK) {
+                const chunk = levels.slice(i, i + CHUNK);
+                const placeholders = chunk.map(() => '(?,?,?,?,?,?,?,?,?,?,?,?,?,?)').join(',');
+                const values = chunk.flatMap(l => [
+                    l.inventory_id,
+                    l.branch_id,
+                    l.description || null,
+                    l.item_class || null,
+                    safeNum(l.default_price),
+                    l.item_status || 'active',
+                    l.base_unit || '',
+                    l.item_type || '',
+                    l.posting_class || '',
+                    l.branch_id,
+                    l.site_id,
+                    safeNum(l.on_hand) ?? 0,
+                    safeNum(l.available) ?? 0,
+                    now,
+                ]);
+                await connection.query(
+                    `INSERT INTO inventory_items
+                        (inventory_id, default_warehouse, inventory_name, item_class,
+                         default_price, item_status, base_unit, type, posting_class,
+                         branch_id, site_id, on_hand, available, last_sync)
+                     VALUES ${placeholders}
+                     ON DUPLICATE KEY UPDATE
+                        on_hand        = VALUES(on_hand),
+                        available      = VALUES(available),
+                        branch_id      = VALUES(branch_id),
+                        site_id        = VALUES(site_id),
+                        inventory_name = COALESCE(VALUES(inventory_name), inventory_name),
+                        item_class     = COALESCE(VALUES(item_class),     item_class),
+                        default_price  = COALESCE(VALUES(default_price),  default_price),
+                        item_status    = COALESCE(VALUES(item_status),    item_status),
+                        base_unit      = COALESCE(VALUES(base_unit),      base_unit),
+                        type           = COALESCE(NULLIF(VALUES(type),''), type),
+                        posting_class  = COALESCE(NULLIF(VALUES(posting_class),''), posting_class),
+                        last_sync      = VALUES(last_sync)`,
+                    values
                 );
             }
             await connection.commit();
         } catch (err) {
             await connection.rollback();
-            console.error("[MySQL upsertInventoryLevels Error]", err);
+            console.error('[MySQL upsertInventoryLevels Error]', err);
             throw err;
         } finally {
             connection.release();
         }
-    }
+    },
+
+    /**
+     * Bulk upsert rows from Supabase product_periodic_sales into db_purchase
+     */
+    async upsertPeriodicSales(rows) {
+        if (!rows.length) return;
+        const connection = await purchasePool.getConnection();
+        try {
+            await connection.beginTransaction();
+            for (const r of rows) {
+                await connection.execute(
+                    `INSERT INTO product_periodic_sales
+                        (id, branch_name, order_type, financial_period, document_date,
+                         description, qty, total_amount, item_class, inventory_id,
+                         posting_class, last_sync)
+                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                     ON DUPLICATE KEY UPDATE
+                        branch_name      = VALUES(branch_name),
+                        order_type       = VALUES(order_type),
+                        financial_period = VALUES(financial_period),
+                        document_date    = VALUES(document_date),
+                        description      = VALUES(description),
+                        qty              = VALUES(qty),
+                        total_amount     = VALUES(total_amount),
+                        item_class       = VALUES(item_class),
+                        inventory_id     = VALUES(inventory_id),
+                        posting_class    = VALUES(posting_class),
+                        last_sync        = VALUES(last_sync)`,
+                    [
+                        r.id,
+                        r.branch_name ?? null,
+                        r.order_type ?? null,
+                        r.financial_period ?? null,
+                        r.document_date ?? null,
+                        r.description ?? null,
+                        r.qty ?? null,
+                        r.total_amount ?? null,
+                        r.item_class ?? null,
+                        r.inventory_id ?? null,
+                        r.posting_class ?? null,
+                        r.last_sync ? new Date(r.last_sync) : new Date(),
+                    ]
+                );
+            }
+            await connection.commit();
+        } catch (err) {
+            await connection.rollback();
+            console.error("[MySQL upsertPeriodicSales Error]", err);
+            throw err;
+        } finally {
+            connection.release();
+        }
+    },
+
+    /**
+     * Aggregate periodic sales by inventory_id for a given branch/search filter.
+     * Returns Map<inventory_id_upper, { qty_sold, total_sales }>
+     */
+    async getPeriodicSalesSummary({ branch = "", search = "" } = {}) {
+        try {
+            const whereClauses = [];
+            const params = [];
+
+            if (branch) {
+                whereClauses.push("UPPER(branch_name) = UPPER(?)");
+                params.push(branch);
+            }
+            if (search) {
+                whereClauses.push("(inventory_id LIKE ? OR description LIKE ?)");
+                params.push(`%${search}%`, `%${search}%`);
+            }
+
+            const wherePart = whereClauses.length ? `WHERE ${whereClauses.join(" AND ")}` : "";
+
+            const [rows] = await purchasePool.query(
+                `SELECT
+                    UPPER(TRIM(inventory_id)) AS inventory_id,
+                    SUM(qty)          AS qty_sold,
+                    SUM(total_amount) AS total_sales
+                 FROM product_periodic_sales
+                 ${wherePart}
+                 GROUP BY UPPER(TRIM(inventory_id))`,
+                params
+            );
+
+            const map = new Map();
+            for (const r of rows) {
+                if (r.inventory_id) {
+                    map.set(r.inventory_id, {
+                        qty_sold: Number(r.qty_sold) || 0,
+                        total_sales: Number(r.total_sales) || 0,
+                    });
+                }
+            }
+            return map;
+        } catch (err) {
+            console.error("[MySQL getPeriodicSalesSummary Error]", err);
+            return new Map();
+        }
+    },
 };

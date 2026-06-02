@@ -34,6 +34,15 @@ export async function POST(request) {
                 controller.enqueue(encoder.encode(JSON.stringify(data) + "\n"));
             };
 
+            // Keep-alive: send a ping every 15s so the stream doesn't time out
+            // during long DB writes or slow Acumatica responses.
+            const keepAlive = setInterval(() => {
+                if (!signal.aborted) {
+                    try { controller.enqueue(encoder.encode(JSON.stringify({ ping: true }) + "\n")); } catch { /* stream may be closed */ }
+                }
+            }, 15000);
+            const finish = () => { clearInterval(keepAlive); controller.close(); };
+
             const getF = (obj, keyName) => {
                 if (!obj) return "";
                 const k = Object.keys(obj).find(i => i.toLowerCase() === keyName.toLowerCase());
@@ -61,16 +70,21 @@ export async function POST(request) {
                         totalItems = parseInt(cData["@odata.count"] || cData["count"] || 0) || totalItems;
                     } catch (e) { }
 
-                    // 1a. Branches
+                    // 1a. Branches (non-fatal — sync continues even if this step fails)
                     send({ section: "Inventory", details: "Updating branches...", progress: 5 });
-                    const branches = await AcumaticaService.getRealBranches(cookie);
-                    if (branches.length > 0) {
-                        const bRows = branches.map(b => ({
-                            branch_id: String(b.BranchID).trim(),
-                            branch_name: String(b.Description || b.BranchID).trim(),
-                            active: true
-                        }));
-                        await MySqlService.upsertBranches(bRows);
+                    try {
+                        const branches = await AcumaticaService.getRealBranches(cookie);
+                        if (branches.length > 0) {
+                            const bRows = branches.map(b => ({
+                                branch_id: String(b.BranchID).trim(),
+                                branch_name: String(b.Description || b.BranchID).trim(),
+                                active: true
+                            }));
+                            await MySqlService.upsertBranches(bRows);
+                        }
+                    } catch (bErr) {
+                        console.warn("[Sync] Branches step failed (non-fatal):", bErr?.message);
+                        send({ section: "Inventory", details: `Branches skipped: ${bErr?.message || "unavailable"}`, progress: 8 });
                     }
 
                     // 1b. Products
@@ -89,9 +103,11 @@ export async function POST(request) {
                                 inventory_id: invId,
                                 description: String(getF(item, "Description")).trim(),
                                 item_class: String(getF(item, "ItemClass")).trim(),
-                                default_price: Number(getAny(item, "DefaultPrice", "ListPrice") || 0),
-                                item_status: String(getAny(item, "ItemStatus") || "Active").trim(),
-                                base_unit: String(getAny(item, "BaseUnit") || "").trim()
+                                default_price: parseFloat(String(getAny(item, "DefaultPrice", "ListPrice") || "0")) || 0,
+                                item_status: String(getAny(item, "ItemStatus") || "active").trim().toLowerCase(),
+                                base_unit: String(getAny(item, "BaseUnit") || "").trim(),
+                                item_type: String(getAny(item, "ItemType", "Type") || "").trim(),
+                                posting_class: String(getAny(item, "PostingClass") || "").trim(),
                             };
                         }).filter(Boolean);
 
@@ -122,6 +138,15 @@ export async function POST(request) {
                             if (wds.value) wds = wds.value;
                             if (!Array.isArray(wds)) continue;
 
+                            // Catalog fields — available on every StockItem even when expanding WarehouseDetails
+                            const description = String(getF(item, "Description")).trim();
+                            const item_class = String(getF(item, "ItemClass")).trim();
+                            const default_price = parseFloat(String(getAny(item, "DefaultPrice", "ListPrice") || "0")) || 0;
+                            const item_status = String(getAny(item, "ItemStatus") || "active").trim().toLowerCase();
+                            const base_unit = String(getAny(item, "BaseUnit") || "").trim();
+                            const item_type = String(getAny(item, "ItemType", "Type") || "").trim();
+                            const posting_class = String(getAny(item, "PostingClass") || "").trim();
+
                             for (const wh of wds) {
                                 const whId = String(getAny(wh, "WarehouseID", "SiteID")).trim();
                                 if (!whId) continue;
@@ -130,7 +155,15 @@ export async function POST(request) {
                                     branch_id: whId,
                                     site_id: whId,
                                     on_hand: Number(getAny(wh, "QtyOnHand") || 0),
-                                    available: Number(getAny(wh, "QtyAvailable") || 0)
+                                    available: Number(getAny(wh, "QtyAvailable") || 0),
+                                    // Catalog fields for first-sync INSERT
+                                    description,
+                                    item_class,
+                                    default_price,
+                                    item_status,
+                                    base_unit,
+                                    item_type,
+                                    posting_class,
                                 });
                             }
                         }
@@ -153,11 +186,11 @@ export async function POST(request) {
                 }
 
                 send({ status: "complete", message: "Sync completed successfully" });
-                controller.close();
+                finish();
             } catch (err) {
                 console.error(">>> [Sync Error]", err);
-                send({ status: "error", message: err.message });
-                controller.close();
+                send({ status: "error", message: err?.message || String(err) || "An unknown sync error occurred" });
+                finish();
             }
         }
     });

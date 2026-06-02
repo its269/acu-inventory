@@ -7,17 +7,24 @@ let activeSalesSyncId = 0;
 let salesAbortController = null;
 
 export const AcumaticaService = {
-    async fetchWithRetry(url, cookie, options = {}) {
+    async fetchWithRetry(url, credential, options = {}) {
+        // credential can be a cookie string OR "__bearer__<token>" from session-store
+        const isBearer = typeof credential === "string" && credential.startsWith("__bearer__");
+        const authHeaders = isBearer
+            ? { "Authorization": `Bearer ${credential.slice(10)}` }
+            : { "Cookie": credential || "" };
+
         let lastError = null;
         for (let attempts = 1; attempts <= 3; attempts++) {
             try {
                 const res = await fetch(url, {
                     ...options,
-                    headers: { "Accept": "application/json", "User-Agent": "Mozilla/5.0", "Cookie": cookie || "", ...options.headers },
+                    headers: { "Accept": "application/json", "User-Agent": "Mozilla/5.0", ...authHeaders, ...options.headers },
                     cache: 'no-store',
                 });
                 if (res.status === 401) throw new Error("Unauthorized");
                 if (res.ok) return res;
+                lastError = new Error(`HTTP ${res.status} from ${url}`);
                 await new Promise(r => setTimeout(r, 1000 * attempts));
             } catch (err) {
                 if (err.name === 'AbortError') throw err;
@@ -35,13 +42,28 @@ export const AcumaticaService = {
     },
 
     async getRealBranches(cookie) {
-        const url = `${ACU_BASE}/Branch?$select=BranchID,Description`;
+        // Try the Branch endpoint first; fall back to Warehouse if unavailable (404)
+        try {
+            const url = `${ACU_BASE}/Branch?$select=BranchID,Description`;
+            const res = await this.fetchWithRetry(url, cookie);
+            const data = await res.json();
+            const raw = data.value || (Array.isArray(data) ? data : []);
+            if (raw.length > 0) {
+                return raw.map(b => ({
+                    BranchID: getF(b, "BranchID"),
+                    Description: getF(b, "Description")
+                }));
+            }
+        } catch { /* fall through to Warehouse fallback */ }
+
+        // Fallback: derive branches from Warehouse
+        const url = `${ACU_BASE}/Warehouse?$select=WarehouseID,Description`;
         const res = await this.fetchWithRetry(url, cookie);
         const data = await res.json();
         const raw = data.value || (Array.isArray(data) ? data : []);
-        return raw.map(b => ({
-            BranchID: getF(b, "BranchID"),
-            Description: getF(b, "Description")
+        return raw.map(w => ({
+            BranchID: getF(w, "WarehouseID"),
+            Description: getF(w, "Description") || getF(w, "WarehouseID")
         }));
     },
 
@@ -53,7 +75,7 @@ export const AcumaticaService = {
         if (search) {
             filterArr.push(`(contains(InventoryID, '${search}') or contains(Description, '${search}'))`);
         }
-        
+
         let url = `${ACU_BASE}/StockItem?$expand=WarehouseDetails&$top=${top}&$skip=${skip}`;
         if (filterArr.length > 0) {
             url += `&$filter=${filterArr.join(" and ")}`;
@@ -67,19 +89,19 @@ export const AcumaticaService = {
         for (const item of items) {
             const wds = item.WarehouseDetails || [];
             if (wds.length === 0) {
-                 if (!branch) {
-                     flattened.push({
-                         InventoryID: { value: getF(item, "InventoryID") },
-                         Description: { value: getF(item, "Description") },
-                         Branch: { value: "—" },
-                         SiteID: { value: "—" },
-                         OnHand: { value: 0 },
-                         Available: { value: 0 },
-                         DefaultPrice: { value: parseFloat(getF(item, "DefaultPrice") || 0) },
-                         ItemClass: { value: getF(item, "ItemClass") },
-                     });
-                 }
-                 continue;
+                if (!branch) {
+                    flattened.push({
+                        InventoryID: { value: getF(item, "InventoryID") },
+                        Description: { value: getF(item, "Description") },
+                        Branch: { value: "—" },
+                        SiteID: { value: "—" },
+                        OnHand: { value: 0 },
+                        Available: { value: 0 },
+                        DefaultPrice: { value: parseFloat(getF(item, "DefaultPrice") || 0) },
+                        ItemClass: { value: getF(item, "ItemClass") },
+                    });
+                }
+                continue;
             }
             for (const wh of wds) {
                 const whId = getF(wh, "WarehouseID");
@@ -97,7 +119,7 @@ export const AcumaticaService = {
                 });
             }
         }
-        
+
         return {
             data: flattened,
             totalCount: flattened.length,
@@ -220,11 +242,11 @@ export const AcumaticaService = {
 
             const description = getF(item, "Description");
             let wds = item.WarehouseDetails || [];
-            
+
             // Handle cases where expansion is wrapped in { value: [...] }
             if (wds && !Array.isArray(wds) && wds.value) wds = wds.value;
             if (!Array.isArray(wds)) wds = [];
-            
+
             // Sum availability across all warehouses
             // We use QtyAvailable as the primary metric, but fallback to QtyOnHand if missing
             const totalAvailable = wds.reduce((sum, wh) => {
@@ -236,7 +258,7 @@ export const AcumaticaService = {
             if (totalAvailable < 50) {
                 const suggestedQty = 100 - totalAvailable;
                 const priority = totalAvailable < 10 ? "High" : totalAvailable < 30 ? "Medium" : "Low";
-                
+
                 recommendations.push({
                     recommendationId: `REC-${recId++}`,
                     itemId: inventoryId,
@@ -291,7 +313,7 @@ export const AcumaticaService = {
 
             if (discoveredIds.length === 0) {
                 console.log(`>>> [Acumatica] [Req #${syncId}] No matching periods found in ERP. Falling back to date-based range.`);
-                
+
                 const startMonth = targetMonths[0];
                 const endMonth = targetMonths[targetMonths.length - 1];
                 if (!startMonth) return [];
@@ -307,10 +329,10 @@ export const AcumaticaService = {
                 for (const entity of entities) {
                     if (signal.aborted) break;
                     console.log(`>>> [Acumatica] [Req #${syncId}] Trying ${entity} (Limit 2000, OrderBy Amount Desc)...`);
-                    
+
                     const filter = `Date ge datetimeoffset'${startDate}' and Date le datetimeoffset'${endDate}'`;
                     const url = `${ACU_BASE}/${entity}?$expand=Details&$top=2000&$filter=${filter}&$orderby=Amount desc`;
-                    
+
                     try {
                         const res = await this.fetchWithRetry(url, cookie, { signal });
                         const data = await res.json();
@@ -323,7 +345,7 @@ export const AcumaticaService = {
                         console.warn(`>>> [Acumatica] [Req #${syncId}] ${entity} fetch failed:`, e.message);
                     }
                 }
-                
+
                 console.log(`>>> [Acumatica] [Req #${syncId}] TOTAL FALLBACK RECORDS: ${flatResults.length}`);
                 return flatResults;
             }
@@ -337,11 +359,11 @@ export const AcumaticaService = {
                     console.log(`>>> [Acumatica] [Req #${syncId}] Fetching Period ${id} (Skip ${skip})...`);
                     // Try Invoice for period-based fetching
                     const url = `${ACU_BASE}/Invoice?$expand=Details&$top=${pageSize}&$skip=${skip}&$filter=PostPeriod eq '${id}'`;
-                    
+
                     const res = await this.fetchWithRetry(url, cookie, { signal });
                     const data = await res.json();
                     const items = data.value || (Array.isArray(data) ? data : []);
-                    
+
                     results.push(...items);
                     if (items.length < pageSize) break;
                     skip += pageSize;

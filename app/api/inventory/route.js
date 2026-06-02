@@ -26,21 +26,34 @@ export async function GET(request) {
             console.log("[BFF] Fetching from MySQL...");
             try {
                 const inventory = await MySqlService.getInventory({ page, pageSize, search, branch });
-                
+
                 let globalStats = { totalValue: 0, lowStock: 0, outOfStock: 0 };
                 if (stats) {
                     globalStats = await MySqlService.getGlobalStats(branch, search);
                 }
 
+                // Merge periodic sales summary (qty_sold, total_sales) per inventory item
+                const salesMap = await MySqlService.getPeriodicSalesSummary({ branch, search });
+                const enriched = inventory.data.map(item => {
+                    const key = (item.InventoryID?.value || "").toUpperCase().trim();
+                    const sales = salesMap.get(key) || { qty_sold: 0, total_sales: 0 };
+                    return {
+                        ...item,
+                        QtySold: { value: sales.qty_sold },
+                        TotalSales: { value: sales.total_sales },
+                    };
+                });
+
                 result = {
                     ...inventory,
+                    data: enriched,
                     globalStats,
                     source: "mysql"
                 };
             } catch (mError) {
                 console.error("[MySQL Inventory Error]", mError);
-                return Response.json({ 
-                    message: "MySQL query failed", 
+                return Response.json({
+                    message: "MySQL query failed",
                     details: mError.message
                 }, { status: 500 });
             }
