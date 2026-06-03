@@ -136,12 +136,10 @@ export const MySqlService = {
     },
 
     /**
-     * Fetch stock items from MySQL database (for Stock Items module)
+     * Fetch stock items from MySQL database (one row per unique inventory_id)
      */
     async getStockItems({ page = 1, pageSize = 50, search = "" } = {}) {
         const offset = (page - 1) * pageSize;
-        // Use integers directly — pool.execute() prepared statements
-        // have issues with LIMIT/OFFSET binding in some MySQL versions
         const limitInt = parseInt(pageSize, 10);
         const offsetInt = parseInt(offset, 10);
 
@@ -154,25 +152,24 @@ export const MySqlService = {
                 params = [`%${search}%`, `%${search}%`];
             }
 
-            // pool.query() avoids prepared-statement LIMIT/OFFSET binding issues
             const [rows] = await pool.query(
                 `SELECT 
                     TRIM(inventory_id) as inventoryId, 
-                    inventory_name as description, 
-                    item_class as itemClass, 
-                    default_warehouse as branch, 
-                    item_status as itemStatus,
-                    base_unit as baseUnit,
-                    default_price as price 
+                    MAX(inventory_name) as description, 
+                    MAX(item_class) as itemClass, 
+                    MAX(item_status) as itemStatus,
+                    MAX(base_unit) as baseUnit,
+                    MAX(default_price) as price 
                  FROM inventory_items 
                  ${whereClause} 
+                 GROUP BY TRIM(inventory_id)
                  ORDER BY inventory_id ASC 
                  LIMIT ${limitInt} OFFSET ${offsetInt}`,
                 params
             );
 
             const [[{ total }]] = await pool.query(
-                `SELECT COUNT(*) as total FROM inventory_items ${whereClause}`,
+                `SELECT COUNT(DISTINCT TRIM(inventory_id)) as total FROM inventory_items ${whereClause}`,
                 params
             );
 
@@ -187,7 +184,7 @@ export const MySqlService = {
     },
 
     /**
-     * Fetch stock item detail from MySQL
+     * Fetch stock item detail from MySQL including all warehouse locations
      */
     async getStockItemDetail(inventoryId) {
         try {
@@ -201,29 +198,49 @@ export const MySqlService = {
                     item_status as itemStatus,
                     base_unit as baseUnit,
                     type,
-                    posting_class as postingClass
+                    posting_class as postingClass,
+                    branch_id as branchId,
+                    site_id as siteId,
+                    on_hand as onHand,
+                    available as available,
+                    last_sync as lastSync
                  FROM inventory_items 
-                 WHERE TRIM(UPPER(inventory_id)) = TRIM(UPPER(?))`,
+                 WHERE TRIM(UPPER(inventory_id)) = TRIM(UPPER(?))
+                 AND default_warehouse != '__catalog__'`,
                 [inventoryId]
             );
 
             if (rows.length === 0) return null;
 
-            const item = rows[0];
+            // Use the first row for shared metadata
+            const first = rows[0];
+            
+            // Map all rows to branch details
+            const branches = rows.map(r => ({
+                branchId: r.branchId || r.siteId,
+                siteId: r.siteId,
+                onHand: Number(r.onHand) || 0,
+                available: Number(r.available) || 0,
+                updatedAt: r.lastSync
+            })).filter(b => b.branchId);
+
+            const totalOnHand = branches.reduce((sum, b) => sum + b.onHand, 0);
+            const totalAvailable = branches.reduce((sum, b) => sum + b.available, 0);
 
             return {
-                inventoryId: item.inventoryId,
-                description: item.description || "—",
-                itemClass: item.itemClass || "—",
-                unitPrice: item.price || 0,
-                itemStatus: item.itemStatus || "—",
-                baseUnit: item.baseUnit || "—",
-                type: item.type || "—",
-                postingClass: item.postingClass || "—",
-                defaultWarehouse: item.branch || "—",
-                totalOnHand: 0,
-                totalAvailable: 0,
-                branches: []
+                inventoryId: first.inventoryId,
+                description: first.description || "—",
+                itemClass: first.itemClass || "—",
+                unitPrice: first.price || 0,
+                itemStatus: first.itemStatus || "—",
+                baseUnit: first.baseUnit || "—",
+                type: first.type || "—",
+                postingClass: first.postingClass || "—",
+                defaultWarehouse: first.branch || "—",
+                totalOnHand,
+                totalAvailable,
+                lastSync: first.lastSync,
+                branches
             };
         } catch (err) {
             console.error("[MySQL getStockItemDetail Error]", err);
@@ -475,15 +492,100 @@ export const MySqlService = {
     },
 
     /**
+     * Get 3-month comparative sales analysis from MySQL
+     */
+    async getSalesAnalysis({ branch = "", targetMonths = [] }) {
+        try {
+            if (targetMonths.length === 0) return { data: [], months: [], metrics: {} };
+
+            const monthKeys = targetMonths.map(m => `${String(m.month).padStart(2, '0')}${m.year}`);
+            const whereClauses = ["financial_period IN (?)"];
+            const params = [monthKeys];
+
+            if (branch && branch !== "All Branches") {
+                whereClauses.push("UPPER(branch_name) = UPPER(?)");
+                params.push(branch);
+            }
+
+            const wherePart = `WHERE ${whereClauses.join(" AND ")}`;
+
+            const [rows] = await purchasePool.query(
+                `SELECT 
+                    inventory_id,
+                    branch_name,
+                    MAX(description) as description,
+                    financial_period as period,
+                    SUM(qty) as qty,
+                    SUM(total_amount) as sales
+                 FROM product_periodic_sales
+                 ${wherePart}
+                 GROUP BY inventory_id, branch_name, financial_period`,
+                params
+            );
+
+            // Group by Item + Branch
+            const grouped = {};
+            let totalRevenue = 0;
+            let totalQtySold = 0;
+
+            for (const r of rows) {
+                const key = `${r.inventory_id}|${r.branch_name}`;
+                if (!grouped[key]) {
+                    grouped[key] = {
+                        inventoryId: r.inventory_id,
+                        branchName: r.branch_name,
+                        description: r.description || "—",
+                        monthlyData: {},
+                        totalQty: 0,
+                        totalSales: 0
+                    };
+                    monthKeys.forEach(mk => {
+                        grouped[key].monthlyData[mk] = { qty: 0, sales: 0 };
+                    });
+                }
+
+                const qty = Number(r.qty) || 0;
+                const sales = Number(r.sales) || 0;
+
+                if (grouped[key].monthlyData[r.period]) {
+                    grouped[key].monthlyData[r.period].qty = qty;
+                    grouped[key].monthlyData[r.period].sales = sales;
+                }
+
+                grouped[key].totalQty += qty;
+                grouped[key].totalSales += sales;
+                totalRevenue += sales;
+                totalQtySold += qty;
+            }
+
+            const finalData = Object.values(grouped).sort((a, b) => b.totalSales - a.totalSales);
+
+            return {
+                data: finalData,
+                metrics: {
+                    totalRevenue,
+                    totalQtySold,
+                    uniqueProducts: finalData.length
+                }
+            };
+        } catch (err) {
+            console.error("[MySQL getSalesAnalysis Error]", err);
+            throw err;
+        }
+    },
+
+    /**
      * Aggregate periodic sales by inventory_id for a given branch/search filter.
      * Returns Map<inventory_id_upper, { qty_sold, total_sales }>
+     * Required by Dashboard Inventory API.
      */
     async getPeriodicSalesSummary({ branch = "", search = "" } = {}) {
         try {
             const whereClauses = [];
             const params = [];
 
-            if (branch) {
+            if (branch && branch !== "All Branches") {
+                // Dashboard passes Branch ID (e.g. MAIN)
                 whereClauses.push("UPPER(branch_name) = UPPER(?)");
                 params.push(branch);
             }

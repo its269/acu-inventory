@@ -102,7 +102,7 @@ export default function StockItemsPage() {
 
                 <div className="db-stats">
                     <div className="db-stat-card db-stat-blue">
-                        <span className="db-stat-label">Total Catalog</span>
+                        <span className="db-stat-label">Total List Item</span>
                         <span className="db-stat-value">{loading && totalCount === 0 ? "..." : totalCount.toLocaleString()}</span>
                         <span className="db-stat-sub">Active Stock Items</span>
                     </div>
@@ -142,22 +142,25 @@ export default function StockItemsPage() {
                     <table className="db-table">
                         <thead>
                             <tr>
-                                <th style={{ width: '200px' }}>Inventory ID</th>
+                                <th style={{ width: '180px' }}>Inventory ID</th>
                                 <th>Description</th>
-                                <th style={{ width: '250px' }}>Item Class</th>
+                                <th style={{ width: '150px' }}>Item Class</th>
+                                <th style={{ width: '100px', textAlign: 'center' }}>Price</th>
+                                <th style={{ width: '80px', textAlign: 'center' }}>Unit</th>
+                                <th style={{ width: '100px', textAlign: 'center' }}>Status</th>
                                 <th style={{ width: '120px', textAlign: 'center' }}>Action</th>
                             </tr>
                         </thead>
                         <tbody>
                             {loading && items.length === 0 ? (
-                                <tr><td colSpan={4} className="si-loading-cell">
+                                <tr><td colSpan={7} className="si-loading-cell">
                                     <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '1rem' }}>
                                         <div className="db-spinner db-spinner-lg"></div>
                                         <span>Fetching items...</span>
                                     </div>
                                 </td></tr>
                             ) : items.length === 0 ? (
-                                <tr><td colSpan={4} className="si-empty-cell">No items found matching your search.</td></tr>
+                                <tr><td colSpan={7} className="si-empty-cell">No items found matching your search.</td></tr>
                             ) : items.map(item => (
                                 <tr
                                     key={item.inventoryId}
@@ -167,6 +170,13 @@ export default function StockItemsPage() {
                                     <td><span className="db-inv-id">{item.inventoryId}</span></td>
                                     <td className="db-desc" style={{ fontWeight: '500', color: '#0f172a' }}>{item.description}</td>
                                     <td><span className="db-class-tag">{item.itemClass}</span></td>
+                                    <td style={{ textAlign: 'center', fontWeight: '600' }}>₱{(Number(item.price) || 0).toLocaleString()}</td>
+                                    <td style={{ textAlign: 'center' }}>{item.baseUnit}</td>
+                                    <td style={{ textAlign: 'center' }}>
+                                        <span className={`idm-status-pill idm-status-pill-sm ${item.itemStatus?.toLowerCase() === 'active' ? 'status-in' : 'status-out'}`} style={{ fontSize: '0.7rem' }}>
+                                            {item.itemStatus}
+                                        </span>
+                                    </td>
                                     <td style={{ textAlign: 'center' }}>
                                         <button className="si-view-btn">View Details</button>
                                     </td>
