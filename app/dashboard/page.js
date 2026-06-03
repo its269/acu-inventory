@@ -271,9 +271,8 @@ export default function DashboardPage() {
 
     const selectedBranchName = useMemo(() => {
         if (!selectedBranch) return "All Branches";
-        const found = branchOptions.find(b => b.id === selectedBranch);
-        return found ? found.name : selectedBranch;
-    }, [selectedBranch, branchOptions]);
+        return selectedBranch;
+    }, [selectedBranch]);
 
     /* ── Render ───────────────────────────────────────────── */
     return (

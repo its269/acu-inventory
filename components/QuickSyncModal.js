@@ -356,7 +356,7 @@ export default function QuickSyncModal({ isOpen, onClose, onStatusChange }) {
                         </div>
                     )}
 
-                    <span className="db-qs-target-db">Destination: MySQL (db_kelin_inventory)</span>
+                    <span className="db-qs-target-db">Destination: MySQL (db_purchase)</span>
                 </div>
             </div>
 

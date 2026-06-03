@@ -5,7 +5,7 @@ const pool = mysql.createPool({
     port: parseInt(process.env.MYSQL_PORT || "3306", 10),
     user: process.env.MYSQL_USER,
     password: process.env.MYSQL_PASSWORD,
-    database: process.env.MYSQL_INVENTORY_DATABASE || process.env.MYSQL_DATABASE,
+    database: process.env.MYSQL_PURCHASE_DATABASE || process.env.MYSQL_INVENTORY_DATABASE || "db_purchase",
     waitForConnections: true,
     connectionLimit: 10,
     queueLimit: 0,
@@ -33,6 +33,11 @@ export const MySqlService = {
             let whereClauses = ["default_warehouse IS NOT NULL", "default_warehouse != '__catalog__'"];
             let params = [];
 
+            if (branch) {
+                whereClauses.push("branch_id = ?");
+                params.push(branch);
+            }
+
             if (search) {
                 whereClauses.push("(inventory_id LIKE ? OR inventory_name LIKE ?)");
                 params.push(`%${search}%`, `%${search}%`);
@@ -48,8 +53,8 @@ export const MySqlService = {
                     inventory_id as InventoryID, 
                     inventory_name as Description, 
                     item_class as ItemClass, 
-                    default_warehouse as Branch, 
-                    default_warehouse as SiteID, 
+                    branch_id as Branch, 
+                    site_id as SiteID, 
                     COALESCE(on_hand, 0) as OnHand, 
                     COALESCE(available, 0) as Available, 
                     default_price as DefaultPrice 
@@ -97,7 +102,7 @@ export const MySqlService = {
             let params = [];
 
             if (branch) {
-                whereClauses.push("default_warehouse = ?");
+                whereClauses.push("branch_id = ?");
                 params.push(branch);
             }
 
@@ -232,12 +237,12 @@ export const MySqlService = {
     async getBranches() {
         try {
             const [rows] = await pool.execute(
-                `SELECT DISTINCT default_warehouse FROM inventory_items WHERE default_warehouse IS NOT NULL AND default_warehouse != '' AND default_warehouse != '__catalog__' ORDER BY default_warehouse ASC`
+                `SELECT DISTINCT branch_id FROM inventory_items WHERE branch_id IS NOT NULL AND branch_id != '' AND branch_id != '__catalog__' ORDER BY branch_id ASC`
             );
 
             return rows.map(r => ({
-                SiteID: r.default_warehouse,
-                Description: { value: r.default_warehouse }
+                SiteID: r.branch_id,
+                Description: { value: r.branch_id }
             }));
         } catch (err) {
             console.error("[MySQL getBranches Error]", err);

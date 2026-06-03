@@ -20,6 +20,10 @@ export default function SyncModal({ isOpen, onClose, onSyncComplete }) {
     const [syncing, setSyncing] = useState(false);
     const [mode, setMode] = useState("incremental");
     const [options, setOptions] = useState({ inventory: true, sales: false });
+    const [dateRange, setDateRange] = useState({ 
+        start: "2024-01-01", 
+        end: new Date().toISOString().split('T')[0] 
+    });
     const [sections, setSections] = useState({});
     const [overallProgress, setOverallProgress] = useState(0);
     const [complete, setComplete] = useState(false);
@@ -85,7 +89,14 @@ export default function SyncModal({ isOpen, onClose, onSyncComplete }) {
         setDisplaySections({});
 
         try {
-            const res = await fetch(`/api/sync?inventory=${options.inventory}&sales=${options.sales}&mode=${mode}`, {
+            const queryParams = new URLSearchParams({
+                inventory: options.inventory,
+                sales: options.sales,
+                mode: mode,
+                startDate: dateRange.start,
+                endDate: dateRange.end
+            });
+            const res = await fetch(`/api/sync?${queryParams.toString()}`, {
                 method: "POST",
             });
 
@@ -183,6 +194,32 @@ export default function SyncModal({ isOpen, onClose, onSyncComplete }) {
                                     </div>
                                 </label>
                             </div>
+
+                            {options.sales && (
+                                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+                                    <div style={{ fontSize: '0.8rem', fontWeight: '700', color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Date Range</div>
+                                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem' }}>
+                                        <div style={{ display: 'flex', flexDirection: 'column', gap: '0.4rem' }}>
+                                            <span style={{ fontSize: '0.75rem', color: '#64748b', fontWeight: '600' }}>Start Date</span>
+                                            <input 
+                                                type="date" 
+                                                value={dateRange.start} 
+                                                onChange={(e) => setDateRange(prev => ({ ...prev, start: e.target.value }))}
+                                                style={{ padding: '0.75rem', borderRadius: '12px', border: '1.5px solid #e2e8f0', fontSize: '0.9rem' }}
+                                            />
+                                        </div>
+                                        <div style={{ display: 'flex', flexDirection: 'column', gap: '0.4rem' }}>
+                                            <span style={{ fontSize: '0.75rem', color: '#64748b', fontWeight: '600' }}>End Date</span>
+                                            <input 
+                                                type="date" 
+                                                value={dateRange.end} 
+                                                onChange={(e) => setDateRange(prev => ({ ...prev, end: e.target.value }))}
+                                                style={{ padding: '0.75rem', borderRadius: '12px', border: '1.5px solid #e2e8f0', fontSize: '0.9rem' }}
+                                            />
+                                        </div>
+                                    </div>
+                                </div>
+                            )}
 
                             {/* Sync Type Section */}
                             <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
@@ -285,6 +322,10 @@ export default function SyncModal({ isOpen, onClose, onSyncComplete }) {
                             {(complete && displayOverall === 100) ? "Close" : (error ? "Close" : "Syncing...")}
                         </button>
                     )}
+
+                    <div style={{ textAlign: 'center', marginTop: '1rem' }}>
+                        <span style={{ fontSize: '0.75rem', color: '#94a3b8', fontWeight: '600' }}>Destination: MySQL (db_purchase)</span>
+                    </div>
                 </div>
             </div>
         </div>

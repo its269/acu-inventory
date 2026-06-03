@@ -24,7 +24,9 @@ export async function POST(request) {
     const options = {
         inventory: searchParams.get("inventory") === "true",
         sales: searchParams.get("sales") === "true",
-        mode: searchParams.get("mode") || "incremental"
+        mode: searchParams.get("mode") || "incremental",
+        startDate: searchParams.get("startDate"),
+        endDate: searchParams.get("endDate"),
     };
 
     const stream = new ReadableStream({
@@ -70,7 +72,7 @@ export async function POST(request) {
                         totalItems = parseInt(cData["@odata.count"] || cData["count"] || 0) || totalItems;
                     } catch (e) { }
 
-                    // 1a. Branches (non-fatal — sync continues even if this step fails)
+                    // 1a. Branches
                     send({ section: "Inventory", details: "Updating branches...", progress: 5 });
                     try {
                         const branches = await AcumaticaService.getRealBranches(cookie);
@@ -138,7 +140,6 @@ export async function POST(request) {
                             if (wds.value) wds = wds.value;
                             if (!Array.isArray(wds)) continue;
 
-                            // Catalog fields — available on every StockItem even when expanding WarehouseDetails
                             const description = String(getF(item, "Description")).trim();
                             const item_class = String(getF(item, "ItemClass")).trim();
                             const default_price = parseFloat(String(getAny(item, "DefaultPrice", "ListPrice") || "0")) || 0;
@@ -156,7 +157,6 @@ export async function POST(request) {
                                     site_id: whId,
                                     on_hand: Number(getAny(wh, "QtyOnHand") || 0),
                                     available: Number(getAny(wh, "QtyAvailable") || 0),
-                                    // Catalog fields for first-sync INSERT
                                     description,
                                     item_class,
                                     default_price,
@@ -180,9 +180,76 @@ export async function POST(request) {
                     send({ section: "Inventory", status: "done", details: `Complete! ${pTotal} products, ${lTotal} levels.`, progress: 100 });
                 }
 
-                // Phase 2 (Sales) would be similar, skipping for brevity or implementing if needed
                 if (options.sales) {
-                    send({ section: "Sales", status: "done", details: "Sales sync to MySQL placeholder", progress: 100 });
+                    send({ section: "Sales history", details: "Fetching sales from Acumatica...", progress: 0 });
+                    
+                    const startDate = options.startDate || "2024-01-01"; 
+                    const endDate = options.endDate || new Date().toISOString().split('T')[0];
+
+                    let filterArr = [
+                        `Date ge datetimeoffset'${startDate}T00:00:00Z'`,
+                        `Date le datetimeoffset'${endDate}T23:59:59Z'`,
+                        `Status eq 'Open' or Status eq 'Closed'`
+                    ];
+                    
+                    const filter = `&$filter=${filterArr.join(" and ")}`;
+                    let sSkip = 0, sTotal = 0;
+                    
+                    while (!signal.aborted) {
+                        const url = `${ACU_BASE}/SalesInvoice?$expand=Details&$top=50&$skip=${sSkip}${filter}&$orderby=Date desc`;
+                        const res = await AcumaticaService.fetchWithRetry(url, cookie);
+                        const data = await res.json();
+                        const rawInvoices = data.value || (Array.isArray(data) ? data : []);
+                        
+                        if (rawInvoices.length === 0) break;
+
+                        const salesRows = [];
+                        for (const inv of rawInvoices) {
+                            const refNbr = getF(inv, "ReferenceNbr");
+                            const branchName = getF(inv, "Branch");
+                            const orderType = getF(inv, "Type");
+                            const financialPeriod = getF(inv, "PostPeriod");
+                            const docDate = getF(inv, "Date");
+                            
+                            const details = inv.Details || [];
+                            for (const line of details) {
+                                const lineNbr = getF(line, "LineNbr");
+                                const invId = getF(line, "InventoryID");
+                                if (!invId) continue;
+
+                                salesRows.push({
+                                    id: `${refNbr}-${lineNbr}`,
+                                    branch_name: branchName,
+                                    order_type: orderType,
+                                    financial_period: financialPeriod,
+                                    document_date: docDate ? docDate.split('T')[0] : null,
+                                    description: getF(line, "Description"),
+                                    qty: parseFloat(getF(line, "Qty") || 0),
+                                    total_amount: parseFloat(getF(line, "Amount") || 0),
+                                    item_class: null,
+                                    inventory_id: invId,
+                                    posting_class: null,
+                                    last_sync: new Date(),
+                                });
+                            }
+                        }
+
+                        if (salesRows.length > 0) {
+                            await MySqlService.upsertPeriodicSales(salesRows);
+                            sTotal += salesRows.length;
+                        }
+                        
+                        sSkip += rawInvoices.length;
+                        send({ 
+                            section: "Sales history", 
+                            details: `Sales: ${sTotal} records synced...`, 
+                            progress: Math.min(99, Math.floor((sSkip / (sSkip + 50)) * 100)) 
+                        });
+                        
+                        if (rawInvoices.length < 50) break;
+                    }
+
+                    send({ section: "Sales history", status: "done", details: `Complete! ${sTotal} sales records synced.`, progress: 100 });
                 }
 
                 send({ status: "complete", message: "Sync completed successfully" });
