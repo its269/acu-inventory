@@ -62,8 +62,29 @@ export async function POST(request) {
 
             try {
                 const ACU_BASE = "https://accounting.holocrontrackertrading.com/ERP/entity/Default/20.200.001";
-                const isDelta = options.mode === "delta";
+                const isDelta = options.mode === "delta" || options.mode === "incremental";
                 const todayStr = new Date().toISOString().split('T')[0];
+
+                // Get last sync timestamps for incremental mode
+                let lastInvSync = null;
+                let lastSalesSync = null;
+                if (isDelta) {
+                    lastInvSync = await MySqlService.getLastInventorySyncTime();
+                    lastSalesSync = await MySqlService.getLastSalesSyncTime();
+                    
+                    // Add 5-minute safety overlap buffer if timestamp exists
+                    // Also format to ISO without milliseconds for better OData compatibility
+                    const formatOData = (date) => date.toISOString().replace(/\.\d{3}/, "");
+
+                    if (lastInvSync) {
+                        const d = new Date(new Date(lastInvSync).getTime() - (5 * 60 * 1000));
+                        lastInvSync = formatOData(d);
+                    }
+                    if (lastSalesSync) {
+                        const d = new Date(new Date(lastSalesSync).getTime() - (5 * 60 * 1000));
+                        lastSalesSync = formatOData(d);
+                    }
+                }
 
                 // 1. BRANCHES (Always fast, sync every time)
                 send({ section: "Inventory", details: "Updating branches...", progress: 5 });
@@ -79,67 +100,76 @@ export async function POST(request) {
 
                 // 2. INVENTORY
                 if (options.inventory) {
-                    if (isDelta) {
-                        send({ section: "Inventory", details: "Scanning for Today's changes...", progress: 10 });
-                        // In Delta mode, we only refresh inventory for items sold TODAY (near-instant)
+                    const filterArr = [];
+                    if (isDelta && lastInvSync) {
+                        filterArr.push(`LastModified gt datetimeoffset'${lastInvSync}'`);
+                        send({ section: "Inventory", details: `Incremental Sync: Fetching changes since ${lastInvSync}...`, progress: 10 });
                     } else {
                         send({ section: "Inventory", details: "Full Daily Refresh: Scanning 3,000+ items...", progress: 10 });
-                        let skip = 0, totalSynced = 0, top = 100;
-                        while (!signal.aborted) {
-                            const url = `${ACU_BASE}/StockItem?$expand=WarehouseDetails&$top=${top}&$skip=${skip}`;
-                            const res = await AcumaticaService.fetchWithRetry(url, cookie);
-                            const data = await res.json();
-                            const items = data.value || (Array.isArray(data) ? data : []);
-                            if (items.length === 0) break;
+                    }
 
-                            const levels = [];
-                            const catalogs = [];
-                            for (const item of items) {
-                                const invId = String(getF(item, "InventoryID")).trim();
-                                if (!invId) continue;
-                                const desc = String(getF(item, "Description")).trim();
-                                const itemClass = String(getF(item, "ItemClass")).trim();
-                                catalogs.push({
-                                    inventory_id: invId, description: desc, item_class: itemClass,
-                                    default_price: parseFloat(getF(item, "DefaultPrice") || 0),
-                                    item_status: String(getF(item, "ItemStatus") || "Active"),
-                                    base_unit: String(getF(item, "BaseUnit") || ""),
-                                });
-                                let wds = item.WarehouseDetails || [];
-                                if (wds.value) wds = wds.value;
-                                if (Array.isArray(wds)) {
-                                    for (const wh of wds) {
-                                        const whId = String(getAny(wh, "WarehouseID", "SiteID")).trim();
-                                        if (whId) levels.push({
-                                            inventory_id: invId, branch_id: whId, site_id: whId,
-                                            on_hand: Number(getAny(wh, "QtyOnHand") || 0),
-                                            available: Number(getAny(wh, "QtyAvailable") || 0),
-                                            description: desc, item_class: itemClass
-                                        });
-                                    }
+                    const filterStr = filterArr.length > 0 ? `&$filter=${filterArr.join(" and ")}` : "";
+                    let skip = 0, totalSynced = 0, top = 100;
+                    
+                    while (!signal.aborted) {
+                        const url = `${ACU_BASE}/StockItem?$expand=WarehouseDetails&$top=${top}&$skip=${skip}${filterStr}`;
+                        const res = await AcumaticaService.fetchWithRetry(url, cookie);
+                        const data = await res.json();
+                        const items = data.value || (Array.isArray(data) ? data : []);
+                        if (items.length === 0) break;
+
+                        const levels = [];
+                        const catalogs = [];
+                        for (const item of items) {
+                            const invId = String(getF(item, "InventoryID")).trim();
+                            if (!invId) continue;
+                            const desc = String(getF(item, "Description")).trim();
+                            const itemClass = String(getF(item, "ItemClass")).trim();
+                            catalogs.push({
+                                inventory_id: invId, description: desc, item_class: itemClass,
+                                default_price: parseFloat(getF(item, "DefaultPrice") || 0),
+                                item_status: String(getF(item, "ItemStatus") || "Active"),
+                                base_unit: String(getF(item, "BaseUnit") || ""),
+                            });
+                            let wds = item.WarehouseDetails || [];
+                            if (wds.value) wds = wds.value;
+                            if (Array.isArray(wds)) {
+                                for (const wh of wds) {
+                                    const whId = String(getAny(wh, "WarehouseID", "SiteID")).trim();
+                                    if (whId) levels.push({
+                                        inventory_id: invId, branch_id: whId, site_id: whId,
+                                        on_hand: Number(getAny(wh, "QtyOnHand") || 0),
+                                        available: Number(getAny(wh, "QtyAvailable") || 0),
+                                        description: desc, item_class: itemClass
+                                    });
                                 }
                             }
-                            await MySqlService.upsertInventoryItems(catalogs);
-                            await MySqlService.upsertInventoryLevels(levels);
-                            totalSynced += items.length; skip += items.length;
-                            send({ section: "Inventory", details: `Processed ${totalSynced} items...`, progress: Math.min(99, 45) });
-                            if (items.length < top) break;
                         }
+                        await MySqlService.upsertInventoryItems(catalogs);
+                        await MySqlService.upsertInventoryLevels(levels);
+                        totalSynced += items.length; skip += items.length;
+                        send({ section: "Inventory", details: `Processed ${totalSynced} items...`, progress: Math.min(99, 45) });
+                        if (items.length < top) break;
                     }
                 }
 
                 // 3. SALES
                 const affectedInventoryIds = new Set();
                 if (options.sales) {
-                    let sStart = options.startDate || "2024-01-01";
-                    if (isDelta) sStart = todayStr;
+                    const filterArr = [];
+                    if (isDelta && lastSalesSync) {
+                        filterArr.push(`LastModifiedDateTime gt datetimeoffset'${lastSalesSync}'`);
+                        send({ section: "Sales history", details: `Incremental Sync: Fetching changes since ${lastSalesSync}...`, progress: 50 });
+                    } else {
+                        let sStart = options.startDate || "2024-01-01";
+                        filterArr.push(`Date ge datetimeoffset'${sStart}T00:00:00Z' and Date le datetimeoffset'${(options.endDate || todayStr)}T23:59:59Z'`);
+                        send({ section: "Sales history", details: `Full Sync: Range ${sStart} to ${options.endDate || todayStr}`, progress: 50 });
+                    }
 
-                    send({ section: "Sales history", details: isDelta ? "Syncing Today's sales..." : `Full Sync: Range ${sStart} to ${options.endDate || todayStr}`, progress: 50 });
-
-                    const filter = `$filter=Date ge datetimeoffset'${sStart}T00:00:00Z' and Date le datetimeoffset'${(options.endDate || todayStr)}T23:59:59Z' and (Status eq 'Open' or Status eq 'Closed')`;
+                    const filterStr = `$filter=${filterArr.join(" and ")}`;
                     let sSkip = 0, sTotal = 0;
                     while (!signal.aborted) {
-                        const url = `${ACU_BASE}/SalesInvoice?$expand=Details&$top=100&$skip=${sSkip}&${filter}&$orderby=Date desc`;
+                        const url = `${ACU_BASE}/Invoice?$expand=Details&$top=100&$skip=${sSkip}&${filterStr}`;
                         const res = await AcumaticaService.fetchWithRetry(url, cookie);
                         const data = await res.json();
                         const invoices = data.value || [];
@@ -153,7 +183,7 @@ export async function POST(request) {
                             for (const line of (inv.Details || [])) {
                                 const invId = getF(line, "InventoryID");
                                 if (!invId) continue;
-                                if (isDelta) affectedInventoryIds.add(invId);
+                                if (options.mode === "delta") affectedInventoryIds.add(invId);
                                 salesRows.push({
                                     id: `${refNbr}-${getF(line, "LineNbr")}`,
                                     branch_name: branchName,
@@ -177,7 +207,7 @@ export async function POST(request) {
                 }
 
                 // 4. SMART DELTA REFRESH (Only for items sold today)
-                if (isDelta && affectedInventoryIds.size > 0) {
+                if (options.mode === "delta" && affectedInventoryIds.size > 0) {
                     send({ section: "Inventory", details: `Updating stocks for ${affectedInventoryIds.size} sold items...`, progress: 95 });
                     const idList = Array.from(affectedInventoryIds);
                     const idChunks = [];

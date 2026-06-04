@@ -1,63 +1,71 @@
 "use client";
 
-import { useState, useMemo, useRef } from "react";
-import "@/styles/dashboard.css";
+import { useState, useMemo, useRef, useEffect } from "react";
+import "@/styles/sync.css";
 
 /* ── SVG Icons ─────────────────────────────────────────── */
 const IconClose = () => (
-    <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-        <line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" />
+    <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+        <line x1="18" cy1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" />
     </svg>
 );
-const IconSyncHeader = () => (
-    <svg xmlns="http://www.w3.org/2000/svg" width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-        <path d="M21 12a9 9 0 0 0-9-9 9.75 9.75 0 0 0-6.74 2.74L3 8" />
-        <path d="M3 3v5h5" />
-        <path d="M3 12a9 9 0 0 0 9 9 9.75 9.75 0 0 0 6.74-2.74L21 16" />
-        <path d="M16 16h5v5" />
+const IconSync = () => (
+    <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M21 12a9 9 0 0 0-9-9 9.75 9.75 0 0 0-6.74 2.74L3 8" /><path d="M3 3v5h5" />
+        <path d="M3 12a9 9 0 0 0 9 9 9.75 9.75 0 0 0 6.74-2.74L21 16" /><path d="M16 16h5v5" />
     </svg>
 );
 const IconRocket = () => (
-    <svg xmlns="http://www.w3.org/2000/svg" width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-        <path d="M4.5 16.5c-1.5 1.26-2 5-2 5s3.74-.5 5-2c.71-.84.7-2.13-.09-2.91a2.18 2.18 0 0 0-2.91-.09z" />
+    <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
         <path d="m12 15-3-3a22 22 0 0 1 2-3.95A12.88 12.88 0 0 1 22 2c0 2.72-.78 7.5-6 11a22.35 22.35 0 0 1-4 2z" />
-        <path d="M9 12H4s.55-3.03 2-5c1.62-2.2 5-3 5-3" />
-        <path d="M12 15v5s3.03-.55 5-2c2.2-1.62 3-5 3-5" />
+        <path d="M9 12H4s.55-3.03 2-5c1.62-2.2 5-3 5-3" /><path d="M12 15v5s3.03-.55 5-2c2.2-1.62 3-5 3-5" />
     </svg>
 );
 const IconTarget = () => (
-    <svg xmlns="http://www.w3.org/2000/svg" width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-        <circle cx="12" cy="12" r="10" /><circle cx="12" cy="12" r="6" /><circle cx="12" cy="12" r="2" />
-    </svg>
-);
-const IconDatabase = () => (
-    <svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-        <ellipse cx="12" cy="5" rx="9" ry="3" /><path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5" /><path d="M3 12c0 1.66 4 3 9 3s9-1.34 9-3" />
+    <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+        <circle cx="12" cy="12" r="10" /><circle cx="12" cy="12" r="2" />
     </svg>
 );
 const IconCheck = () => (
-    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#22c55e" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
+    <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
         <polyline points="20 6 9 17 4 12" />
+    </svg>
+);
+const IconAlert = () => (
+    <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+        <circle cx="12" cy="12" r="10" /><line x1="12" y1="8" x2="12" y2="12" /><line x1="12" y1="16" x2="12.01" y2="16" />
     </svg>
 );
 
 const MODULES = [
     { id: "inventory", name: "Inventory", apiFlag: "inventory" },
-    { id: "products", name: "Products", apiFlag: "inventory" },
-    { id: "branches", name: "Branches", apiFlag: "inventory" },
     { id: "sales", name: "Sales", apiFlag: "sales" },
 ];
 
 export default function QuickSyncModal({ isOpen, onClose, onStatusChange }) {
     const [syncType, setSyncType] = useState("all");
-    const [selectedModules, setSelectedModules] = useState({});
+    const [selectedModules, setSelectedModules] = useState({ inventory: true });
     const [isSyncing, setIsSyncing] = useState(false);
     const [sections, setSections] = useState({});
     const [logs, setLogs] = useState([]);
     const [complete, setComplete] = useState(false);
     const [error, setError] = useState(null);
+    const [isUnfinished, setIsUnfinished] = useState(false);
     const [overallProgress, setOverallProgress] = useState(0);
+    const [displayProgress, setDisplayProgress] = useState(0);
     const logsEndRef = useRef(null);
+
+    // Smooth progress animation
+    useEffect(() => {
+        if (!isSyncing && !complete) return;
+        const interval = setInterval(() => {
+            setDisplayProgress(prev => {
+                if (prev < overallProgress) return Math.min(prev + 1, overallProgress, 100);
+                return prev;
+            });
+        }, 30);
+        return () => clearInterval(interval);
+    }, [isSyncing, complete, overallProgress]);
 
     const toggleModule = (id) => {
         if (isSyncing) return;
@@ -75,46 +83,27 @@ export default function QuickSyncModal({ isOpen, onClose, onStatusChange }) {
     const handleSync = async () => {
         if (isSyncing) return;
 
-        // Determine which API flags to enable
-        let useInventory = false;
-        let useSales = false;
+        let useInventory = syncType === "all" || selectedModules.inventory;
+        let useSales = syncType === "all" ? false : selectedModules.sales;
 
-        if (syncType === "all") {
-            useInventory = true;
-            useSales = false; // sales is a placeholder — skip unless explicitly chosen
-        } else {
-            const activeFlags = new Set(
-                MODULES.filter(m => selectedModules[m.id]).map(m => m.apiFlag)
-            );
-            useInventory = activeFlags.has("inventory");
-            useSales = activeFlags.has("sales");
-        }
-
-        if (!useInventory && !useSales) {
-            alert("Please select at least one module.");
-            return;
-        }
+        if (!useInventory && !useSales) return;
 
         setIsSyncing(true);
         setComplete(false);
         setError(null);
+        setIsUnfinished(false);
         setSections({});
         setLogs([]);
         setOverallProgress(0);
-        addLog("Starting sync...");
+        setDisplayProgress(0);
         onStatusChange?.("syncing");
+
+        let finishedProperly = false;
 
         try {
             const mode = syncType === "delta" ? "delta" : "incremental";
-            const res = await fetch(
-                `/api/sync?inventory=${useInventory}&sales=${useSales}&mode=${mode}`,
-                { method: "POST" }
-            );
-
-            if (!res.ok) {
-                const body = await res.json().catch(() => ({}));
-                throw new Error(body.message || `HTTP ${res.status}`);
-            }
+            const res = await fetch(`/api/sync?inventory=${useInventory}&sales=${useSales}&mode=${mode}`, { method: "POST" });
+            if (!res.ok) throw new Error(`Sync failed (HTTP ${res.status})`);
 
             const reader = res.body.getReader();
             const decoder = new TextDecoder();
@@ -123,7 +112,6 @@ export default function QuickSyncModal({ isOpen, onClose, onStatusChange }) {
             while (true) {
                 const { done, value } = await reader.read();
                 if (done) break;
-
                 buffer += decoder.decode(value, { stream: true });
                 const lines = buffer.split("\n");
                 buffer = lines.pop();
@@ -132,48 +120,37 @@ export default function QuickSyncModal({ isOpen, onClose, onStatusChange }) {
                     if (!line.trim()) continue;
                     try {
                         const data = JSON.parse(line);
-
-                        // Keep-alive ping — ignore
-                        if (data.ping) continue;
-
                         if (data.section) {
                             setSections(prev => {
-                                const next = {
-                                    ...prev,
-                                    [data.section]: {
-                                        status: data.status || prev[data.section]?.status,
-                                        details: data.details || prev[data.section]?.details,
-                                        progress: data.progress ?? prev[data.section]?.progress ?? 0,
-                                    }
-                                };
+                                const next = { ...prev, [data.section]: { status: data.status, details: data.details, progress: data.progress ?? 0 } };
                                 const vals = Object.values(next);
                                 const total = vals.reduce((a, s) => a + (s.progress || 0), 0);
-                                setOverallProgress(Math.min(100, Math.floor(total / vals.length)));
+                                setOverallProgress(Math.floor(total / vals.length));
                                 return next;
                             });
                             if (data.details) addLog(`[${data.section}] ${data.details}`);
                         }
-
-                        if (data.status === "complete") {
-                            setComplete(true);
-                            setOverallProgress(100);
-                            addLog("✓ Sync completed successfully.");
+                        if (data.status === "complete") { 
+                            setComplete(true); 
+                            setOverallProgress(100); 
                             onStatusChange?.("complete");
+                            finishedProperly = true;
                         }
-
-                        if (data.status === "error") {
-                            setError(data.message);
-                            addLog(`✗ Error: ${data.message}`);
+                        if (data.status === "error") { 
+                            setError(data.message); 
                             onStatusChange?.("error");
+                            finishedProperly = true;
                         }
-                    } catch {
-                        // non-JSON line — ignore
-                    }
+                    } catch {}
                 }
+            }
+            
+            if (!finishedProperly) {
+                setIsUnfinished(true);
+                onStatusChange?.("unfinished");
             }
         } catch (err) {
             setError(err.message);
-            addLog(`✗ ${err.message}`);
             onStatusChange?.("error");
         } finally {
             setIsSyncing(false);
@@ -183,196 +160,157 @@ export default function QuickSyncModal({ isOpen, onClose, onStatusChange }) {
     const handleClose = () => {
         if (isSyncing) return;
         setSyncType("all");
-        setSelectedModules({});
+        setSelectedModules({ inventory: true });
         setIsSyncing(false);
-        setSections({});
-        setLogs([]);
         setComplete(false);
         setError(null);
+        setIsUnfinished(false);
         setOverallProgress(0);
+        setDisplayProgress(0);
         onClose();
     };
-
-    const selectedCount = useMemo(
-        () => Object.values(selectedModules).filter(Boolean).length,
-        [selectedModules]
-    );
 
     if (!isOpen) return null;
 
     return (
-        <div className="db-modal-overlay" style={{ zIndex: 10002 }}>
-            <div className="db-modal db-qs-overhaul">
-                {!isSyncing && (
-                    <button className="db-qs-close-v2" onClick={handleClose} aria-label="Close">
-                        <IconClose />
-                    </button>
-                )}
-
-                <div className="db-qs-header-v2">
-                    <div className="db-qs-icon-wrapper">
-                        <IconSyncHeader />
-                    </div>
-                    <div className="db-qs-header-text">
-                        <h2>{isSyncing ? "Syncing data…" : complete ? "Sync complete" : "Quick Data Sync"}</h2>
-                        <p>{isSyncing ? "Do not close this window." : "Synchronize your ERP data with the database"}</p>
-                    </div>
+        <div className="sync-modal-overlay">
+            <div className="sync-modal-card">
+                <div className="sync-modal-header">
+                    <h2>{isSyncing ? "Synchronization" : complete ? "Sync Complete" : error ? "Sync Failed" : isUnfinished ? "Sync Unfinished" : "Quick Sync"}</h2>
+                    {!isSyncing && (
+                        <button className="sync-modal-close" onClick={handleClose}><IconClose /></button>
+                    )}
                 </div>
 
-                <div className="db-qs-body-v2">
-                    {!isSyncing && !complete ? (
-                        /* ── Setup view ── */
-                        <>
-                            <h3 className="db-qs-section-title">Select sync strategy</h3>
-                            <div className="db-qs-strategy-grid" style={{ gridTemplateColumns: 'repeat(3, 1fr)' }}>
-                                <button
-                                    className={`db-qs-strategy-card ${syncType === "delta" ? "active" : ""}`}
-                                    onClick={() => setSyncType("delta")}
-                                >
-                                    <div className="db-qs-strategy-icon" style={{ color: '#0ea5e9' }}><IconRocket /></div>
-                                    <span className="db-qs-strategy-name">Sync Today's Changes</span>
-                                    <span className="db-qs-strategy-desc">New & Sold items</span>
-                                </button>
-                                <button
-                                    className={`db-qs-strategy-card ${syncType === "all" ? "active" : ""}`}
-                                    onClick={() => setSyncType("all")}
-                                >
-                                    <div className="db-qs-strategy-icon"><IconSyncHeader /></div>
-                                    <span className="db-qs-strategy-name">Full Daily Refresh</span>
-                                    <span className="db-qs-strategy-desc">All 3,000+ items</span>
-                                </button>
-                                <button
-                                    className={`db-qs-strategy-card ${syncType === "specific" ? "active" : ""}`}
-                                    onClick={() => setSyncType("specific")}
-                                >
-                                    <div className="db-qs-strategy-icon"><IconTarget /></div>
-                                    <span className="db-qs-strategy-name">Custom Range</span>
-                                    <span className="db-qs-strategy-desc">Choose modules</span>
-                                </button>
-                            </div>
+                <div className="sync-modal-body">
+                    {!isSyncing && !complete && !error && !isUnfinished ? (
+                        <div className="qs-strategy-list">
+                            <button className={`qs-card ${syncType === 'delta' ? 'active' : ''}`} onClick={() => setSyncType('delta')}>
+                                <div className="qs-card-icon"><IconRocket /></div>
+                                <div className="qs-card-info">
+                                    <span className="qs-card-title">Sync Today's Changes</span>
+                                    <span className="qs-card-desc">Only sync items sold or updated today.</span>
+                                </div>
+                            </button>
+                            <button className={`qs-card ${syncType === 'all' ? 'active' : ''}`} onClick={() => setSyncType('all')}>
+                                <div className="qs-card-icon"><IconSync /></div>
+                                <div className="qs-card-info">
+                                    <span className="qs-card-title">Full Daily Refresh</span>
+                                    <span className="qs-card-desc">Sync all 3,000+ inventory items.</span>
+                                </div>
+                            </button>
+                            <button className={`qs-card ${syncType === 'specific' ? 'active' : ''}`} onClick={() => setSyncType('specific')}>
+                                <div className="qs-card-icon"><IconTarget /></div>
+                                <div className="qs-card-info">
+                                    <span className="qs-card-title">Custom Selection</span>
+                                    <span className="qs-card-desc">Pick specific data modules to sync.</span>
+                                </div>
+                            </button>
 
                             {syncType === "specific" && (
-                                <div className="db-qs-module-list-v2">
-                                    {MODULES.map(module => (
-                                        <button
-                                            key={module.id}
-                                            className={`db-qs-module-pill ${selectedModules[module.id] ? "active" : ""}`}
-                                            onClick={() => toggleModule(module.id)}
-                                        >
-                                            <span className="db-qs-module-name">{module.name}</span>
+                                <div className="qs-module-pills">
+                                    {MODULES.map(m => (
+                                        <button key={m.id} className={`qs-pill ${selectedModules[m.id] ? 'active' : ''}`} onClick={() => toggleModule(m.id)}>
+                                            {m.name}
                                         </button>
                                     ))}
                                 </div>
                             )}
-                        </>
+                        </div>
                     ) : (
-                        /* ── Progress + logs view ── */
-                        <>
-                            {/* Status banner */}
-                            <div style={{
-                                display: "flex", alignItems: "center", gap: "0.5rem",
-                                padding: "0.5rem 0.75rem", borderRadius: "8px", marginBottom: "1rem",
-                                background: complete ? "#f0fdf4" : error ? "#fef2f2" : "#eff6ff",
-                                border: `1px solid ${complete ? "#bbf7d0" : error ? "#fecaca" : "#bfdbfe"}`,
-                            }}>
-                                <span style={{
-                                    width: "8px", height: "8px", borderRadius: "50%", flexShrink: 0,
-                                    background: complete ? "#22c55e" : error ? "#ef4444" : "#3b82f6",
-                                    animation: !complete && !error ? "pulse-dot 1.5s ease-in-out infinite" : "none",
-                                }} />
-                                <span style={{ fontSize: "0.82rem", fontWeight: 600, color: complete ? "#15803d" : error ? "#dc2626" : "#1d4ed8" }}>
-                                    {complete ? "Sync completed successfully" : error ? "Sync failed" : "Sync in progress…"}
+                        <div>
+                            <div className={`qs-status-banner ${complete ? 'complete' : error ? 'error' : isUnfinished ? 'error' : 'syncing'}`}>
+                                <div style={{ 
+                                    width: '8px', height: '8px', borderRadius: '50%', 
+                                    background: complete ? '#22c55e' : error || isUnfinished ? '#ef4444' : '#3b82f6',
+                                    animation: !complete && !error && !isUnfinished ? 'pulse 1.5s infinite' : 'none',
+                                    marginRight: '8px'
+                                }}></div>
+                                <span style={{ flex: 1 }}>
+                                    {complete ? "Sync successful" : error ? "Sync failed" : isUnfinished ? "Sync was interrupted" : "Synchronizing data..."}
                                 </span>
-                                {complete && (
-                                    <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#22c55e" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" style={{ marginLeft: "auto" }}>
-                                        <polyline points="20 6 9 17 4 12" />
-                                    </svg>
-                                )}
-                            </div>
-                            {/* Overall progress bar */}
-                            <div style={{ marginBottom: "1rem" }}>
-                                <div style={{ display: "flex", justifyContent: "space-between", marginBottom: "0.4rem" }}>
-                                    <span style={{ fontSize: "0.85rem", fontWeight: 700, color: "#1e293b" }}>Overall</span>
-                                    <span style={{ fontSize: "0.85rem", fontWeight: 700, color: "#3b82f6" }}>{overallProgress}%</span>
-                                </div>
-                                <div style={{ height: "8px", background: "#f1f5f9", borderRadius: "8px", overflow: "hidden" }}>
-                                    <div style={{ width: `${overallProgress}%`, height: "100%", background: complete ? "#22c55e" : "#3b82f6", transition: "width 0.3s ease" }} />
-                                </div>
+                                {complete && <IconCheck />}
+                                {(error || isUnfinished) && <IconAlert />}
                             </div>
 
-                            {/* Per-section progress */}
-                            {Object.entries(sections).map(([section, s]) => (
-                                <div key={section} style={{ marginBottom: "0.75rem" }}>
-                                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "0.3rem" }}>
-                                        <span style={{ fontSize: "0.82rem", fontWeight: 600, color: "#334155" }}>{section}</span>
-                                        <span style={{ display: "flex", alignItems: "center", gap: "0.3rem" }}>
-                                            {s.status === "done" && <IconCheck />}
-                                            <span style={{ fontSize: "0.78rem", color: "#64748b" }}>{s.progress || 0}%</span>
-                                        </span>
-                                    </div>
-                                    <div style={{ height: "6px", background: "#f1f5f9", borderRadius: "6px", overflow: "hidden" }}>
-                                        <div style={{ width: `${s.progress || 0}%`, height: "100%", background: s.status === "done" ? "#22c55e" : "#3b82f6", transition: "width 0.3s ease" }} />
-                                    </div>
-                                    {s.details && (
-                                        <div style={{ fontSize: "0.78rem", color: "#64748b", marginTop: "0.25rem" }}>{s.details}</div>
-                                    )}
-                                </div>
-                            ))}
+                            <div style={{ textAlign: 'center', marginBottom: '1.5rem' }}>
+                                <div style={{ fontSize: '2.5rem', fontWeight: '700', color: error || isUnfinished ? '#ef4444' : 'inherit' }}>{displayProgress}%</div>
+                            </div>
 
-                            {/* Live log */}
-                            <div style={{
-                                marginTop: "1rem", maxHeight: "140px", overflowY: "auto",
-                                background: "#0f172a", borderRadius: "8px", padding: "0.75rem",
-                                fontFamily: "monospace", fontSize: "0.75rem", color: "#94a3b8",
-                            }}>
-                                {logs.map((l, i) => (
-                                    <div key={i} style={{ color: l.startsWith("✓") ? "#22c55e" : l.startsWith("✗") ? "#ef4444" : "#94a3b8", lineHeight: 1.6 }}>{l}</div>
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+                                {Object.entries(sections).map(([name, data]) => (
+                                    <div key={name} style={{ display: 'flex', flexDirection: 'column', gap: '0.4rem' }}>
+                                        <div className="sync-progress-label">
+                                            <span style={{ fontSize: '0.85rem', fontWeight: '500' }}>{name}</span>
+                                            <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>{data.progress || 0}%</span>
+                                        </div>
+                                        <div className="sync-progress-track">
+                                            <div className="sync-progress-bar" style={{ 
+                                                width: `${data.progress || 0}%`,
+                                                background: error || isUnfinished ? '#fca5a5' : data.status === 'done' ? '#22c55e' : 'var(--primary)'
+                                            }} />
+                                        </div>
+                                    </div>
                                 ))}
-                                {isSyncing && (
-                                    <div style={{ display: "inline-block", width: "8px", height: "14px", background: "#3b82f6", animation: "blink 1s step-end infinite" }} />
-                                )}
-                                <div ref={logsEndRef} />
                             </div>
+
+                            {(logs.length > 0 && !complete && !error && !isUnfinished) && (
+                                <div className="qs-log-container">
+                                    {logs.slice(-3).map((log, i) => (
+                                        <div key={i} className="qs-log-line">{log}</div>
+                                    ))}
+                                    <div ref={logsEndRef} />
+                                </div>
+                            )}
 
                             {error && (
-                                <div style={{ marginTop: "0.75rem", padding: "0.6rem 0.8rem", background: "#fef2f2", border: "1px solid #fecaca", borderRadius: "8px", fontSize: "0.82rem", color: "#dc2626" }}>
-                                    {error}
+                                <div style={{ 
+                                    color: '#991b1b', background: '#fef2f2', border: '1px solid #fecaca',
+                                    fontSize: '0.8rem', marginTop: '1rem', padding: '0.75rem', borderRadius: '8px',
+                                    display: 'flex', gap: '8px'
+                                }}>
+                                    <IconAlert />
+                                    <span>{error}</span>
                                 </div>
                             )}
-                        </>
-                    )}
-
-                    {/* Action button */}
-                    {!isSyncing && (
-                        <button
-                            className="db-qs-prime-btn"
-                            onClick={complete ? handleClose : handleSync}
-                            disabled={syncType === "specific" && selectedCount === 0}
-                            style={{ marginTop: "1.25rem" }}
-                        >
-                            {complete ? (
-                                <><IconCheck /><span>Done</span></>
-                            ) : (
-                                <><IconDatabase /><span>Execute Sync</span></>
+                            
+                            {isUnfinished && (
+                                <div style={{ 
+                                    color: '#92400e', background: '#fffbeb', border: '1px solid #fef3c7',
+                                    fontSize: '0.8rem', marginTop: '1rem', padding: '0.75rem', borderRadius: '8px',
+                                    display: 'flex', gap: '8px'
+                                }}>
+                                    <IconAlert />
+                                    <span>The synchronization process ended unexpectedly. Some data might be incomplete.</span>
+                                </div>
                             )}
-                        </button>
-                    )}
-
-                    {isSyncing && (
-                        <div style={{ display: "flex", alignItems: "center", gap: "0.6rem", marginTop: "1.25rem", justifyContent: "center", color: "#64748b", fontSize: "0.85rem" }}>
-                            <div className="db-spinner" style={{ width: "18px", height: "18px", borderTopColor: "#3b82f6" }} />
-                            <span>Syncing in progress…</span>
                         </div>
                     )}
+                </div>
 
-                    <span className="db-qs-target-db">Destination: MySQL (db_purchase)</span>
+                <div className="sync-modal-footer">
+                    {!isSyncing && (
+                        <button className="sync-start-btn" onClick={complete || error || isUnfinished ? handleClose : handleSync} style={{ 
+                            width: '100%',
+                            background: error || isUnfinished ? '#475569' : undefined
+                        }}>
+                            {complete ? "Close" : error || isUnfinished ? "Close & Retry" : "Start Sync"}
+                        </button>
+                    )}
+                    {isSyncing && (
+                        <div style={{ width: '100%', textAlign: 'center', fontSize: '0.85rem', color: 'var(--text-muted)' }}>
+                            Stay on this page until finished.
+                        </div>
+                    )}
                 </div>
             </div>
-
+            
             <style jsx>{`
-                @keyframes fadeIn { from { opacity: 0; transform: translateY(5px); } to { opacity: 1; transform: translateY(0); } }
-                @keyframes blink { 0%, 100% { opacity: 1; } 50% { opacity: 0; } }
-                @keyframes pulse-dot { 0%, 100% { opacity: 1; transform: scale(1); } 50% { opacity: 0.5; transform: scale(1.4); } }
+                @keyframes pulse {
+                    0% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(59, 130, 246, 0.7); }
+                    70% { transform: scale(1); box-shadow: 0 0 0 6px rgba(59, 130, 246, 0); }
+                    100% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(59, 130, 246, 0); }
+                }
             `}</style>
         </div>
     );

@@ -24,16 +24,31 @@ const purchasePool = mysql.createPool({
 
 export const MySqlService = {
     /**
-     * Get the latest last_sync timestamp from the database
+     * Get the latest last_sync timestamp for inventory items
      */
-    async getLastSyncTime() {
+    async getLastInventorySyncTime() {
         try {
             const [[res]] = await pool.query(
-                `SELECT MAX(last_sync) as lastSync FROM inventory_items WHERE last_sync IS NOT NULL`
+                `SELECT MAX(last_sync) as lastSync FROM inventory_items`
             );
             return res.lastSync || null;
         } catch (err) {
-            console.error("[MySQL getLastSyncTime Error]", err);
+            console.error("[MySQL getLastInventorySyncTime Error]", err);
+            return null;
+        }
+    },
+
+    /**
+     * Get the latest last_sync timestamp for sales
+     */
+    async getLastSalesSyncTime() {
+        try {
+            const [[res]] = await purchasePool.query(
+                `SELECT MAX(last_sync) as lastSync FROM product_periodic_sales`
+            );
+            return res.lastSync || null;
+        } catch (err) {
+            console.error("[MySQL getLastSalesSyncTime Error]", err);
             return null;
         }
     },
