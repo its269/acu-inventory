@@ -38,15 +38,22 @@ export default function InventoryDetailModal({ inventoryId, onClose }) {
         if (!inventoryId) return;
 
         const cacheKey = `stock_detail_${inventoryId}`;
-        const cached = DataCache.get(cacheKey);
-        if (cached) {
-            setDetail(cached);
-            setLoading(false);
-        }
+        
+        // Use a local variable to track cache presence for fetchDetail
+        let hasCache = false;
+
+        Promise.resolve().then(() => {
+            const cached = DataCache.get(cacheKey);
+            if (cached) {
+                hasCache = true;
+                setDetail(cached);
+                setLoading(false);
+            }
+        });
 
         const controller = new AbortController();
         const fetchDetail = async () => {
-            if (!cached) setLoading(true);
+            if (!hasCache) setLoading(true);
             setError(null);
             try {
                 const r = await fetch(`/api/stock-items/${encodeURIComponent(inventoryId)}`, { signal: controller.signal });
@@ -103,6 +110,9 @@ export default function InventoryDetailModal({ inventoryId, onClose }) {
                                 {detail.source === "acumatica" && (
                                     <span className="idm-source idm-source-live">● Live from Acumatica</span>
                                 )}
+                                {detail.source === "mysql" && (
+                                    <span className="idm-source idm-source-live" style={{ color: '#10b981', background: '#ecfdf5', borderColor: '#a7f3d0' }}>● Live from MySQL</span>
+                                )}
                                 {detail.source === "supabase" && (
                                     <span className="idm-source idm-source-cache">● From local database</span>
                                 )}
@@ -117,7 +127,7 @@ export default function InventoryDetailModal({ inventoryId, onClose }) {
                             <div className="idm-card">
                                 <span className="idm-card-label">Total On Hand</span>
                                 <div className="idm-card-value-group">
-                                    <span className="idm-card-value">{Number(detail.totalOnHand).toLocaleString()}</span>
+                                    <span className="idm-card-value">{(Number(detail.totalOnHand) || 0).toLocaleString()}</span>
                                     {totalStatus && (
                                         <span className={`idm-status-pill ${totalStatus.cls}`}>{totalStatus.label}</span>
                                     )}
@@ -126,14 +136,14 @@ export default function InventoryDetailModal({ inventoryId, onClose }) {
                             <div className="idm-card">
                                 <span className="idm-card-label">Total Available</span>
                                 <div className="idm-card-value-group">
-                                    <span className="idm-card-value">{Number(detail.totalAvailable).toLocaleString()}</span>
+                                    <span className="idm-card-value">{(Number(detail.totalAvailable) || 0).toLocaleString()}</span>
                                     <span className="idm-card-label" style={{ fontSize: '0.6rem', color: '#94a3b8' }}>Units</span>
                                 </div>
                             </div>
                             <div className="idm-card">
                                 <span className="idm-card-label">Unit Price</span>
                                 <div className="idm-card-value-group">
-                                    <span className="idm-card-value">₱{Number(detail.unitPrice).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                                    <span className="idm-card-value">₱{(Number(detail.unitPrice) || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
                                 </div>
                             </div>
                             <div className="idm-card">
@@ -145,14 +155,26 @@ export default function InventoryDetailModal({ inventoryId, onClose }) {
                         </div>
 
                         {/* Metadata row */}
-                        <div className="idm-meta-bar">
+                        <div className="idm-meta-bar" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: '1rem', padding: '1rem', background: '#f8fafc', borderRadius: '12px', margin: '1rem 0' }}>
                             <div className="idm-meta-item">
                                 <span className="idm-meta-label">Status:</span>
-                                <span className="idm-meta-value">{detail.itemStatus}</span>
+                                <span className="idm-meta-value" style={{ fontWeight: '700' }}>{detail.itemStatus}</span>
                             </div>
                             <div className="idm-meta-item">
                                 <span className="idm-meta-label">Class:</span>
                                 <span className="idm-meta-value">{detail.itemClass}</span>
+                            </div>
+                            <div className="idm-meta-item">
+                                <span className="idm-meta-label">Type:</span>
+                                <span className="idm-meta-value">{detail.type || "—"}</span>
+                            </div>
+                            <div className="idm-meta-item">
+                                <span className="idm-meta-label">Posting Class:</span>
+                                <span className="idm-meta-value">{detail.postingClass || "—"}</span>
+                            </div>
+                            <div className="idm-meta-item">
+                                <span className="idm-meta-label">Def. Warehouse:</span>
+                                <span className="idm-meta-value">{detail.defaultWarehouse || "—"}</span>
                             </div>
                             {detail.lastSync && (
                                 <div className="idm-meta-item">

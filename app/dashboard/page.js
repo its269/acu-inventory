@@ -93,6 +93,8 @@ const InventoryRow = memo(({ row, index }) => {
     const available = Number(row.Available?.value) || 0;
     const status = getStatus(onHand);
     const price = Number(row.DefaultPrice?.value) || 0;
+    const qtySold = Number(row.QtySold?.value) || 0;
+    const totalSales = Number(row.TotalSales?.value) || 0;
 
     return (
         <tr
@@ -108,6 +110,8 @@ const InventoryRow = memo(({ row, index }) => {
             <td className="db-num">₱{price.toLocaleString("en-PH", { minimumFractionDigits: 2 })}</td>
             <td><span className="db-class-tag">{cellVal(row, "ItemClass")}</span></td>
             <td><span className={`db-status-badge ${STATUS_CLASS[status]}`}>{STATUS_LABEL[status]}</span></td>
+            <td className="db-num">{qtySold > 0 ? qtySold.toLocaleString("en-PH", { minimumFractionDigits: 2 }) : "—"}</td>
+            <td className="db-num">{totalSales > 0 ? `₱${totalSales.toLocaleString("en-PH", { minimumFractionDigits: 2 })}` : "—"}</td>
         </tr>
     );
 });
@@ -117,32 +121,51 @@ export default function DashboardPage() {
     const router = useRouter();
 
     /* ── State ────────────────────────────────────────────── */
+    const [selectedBranch, setSelectedBranch] = useState("");
+    const [search, setSearch] = useState("");
+    const [page, setPage] = useState(1);
+    const [userName, setUserName] = useState("User");
+
     const [allInventory, setAllInventory] = useState([]);
     const [totalCount, setTotalCount] = useState(0);
     const [globalStats, setGlobalStats] = useState({ totalValue: 0, lowStock: 0, outOfStock: 0 });
     const [hasMore, setHasMore] = useState(false);
-    const [selectedBranch, setSelectedBranch] = useState("");
+
     const [branchOptions, setBranchOptions] = useState([]);
-    const [search, setSearch] = useState("");
     const [debouncedSearch, setDebouncedSearch] = useState("");
     const [loading, setLoading] = useState(true);
-    const [syncing, setSyncing] = useState(false);
-    const [syncProgress, setSyncProgress] = useState({ current: 0, total: 27881, stage: "" });
-    const [syncLogs, setSyncLogs] = useState([]);
-    const [page, setPage] = useState(1);
+    const [showQuickSync, setShowQuickSync] = useState(false);
 
-    const [userName, setUserName] = useState("User");
-
-    // Restore persisted filters after hydration (client-side only)
+    // Hydration fix & Initial Restoration
     useEffect(() => {
-        const branch = localStorage.getItem("db_filter_branch") || "";
-        const savedSearch = localStorage.getItem("db_filter_search") || "";
-        const savedPage = parseInt(localStorage.getItem("db_filter_page") || "1");
-        const savedUser = localStorage.getItem("userName") || "";
-        if (branch) setSelectedBranch(branch);
-        if (savedSearch) setSearch(savedSearch);
-        if (savedPage > 1) setPage(savedPage);
-        if (savedUser) setUserName(savedUser);
+        Promise.resolve().then(() => {
+            const b = localStorage.getItem("db_filter_branch") || "";
+            const s = localStorage.getItem("db_filter_search") || "";
+            const p = parseInt(localStorage.getItem("db_filter_page") || "1");
+            const u = localStorage.getItem("userName") || "User";
+
+            if (b) setSelectedBranch(b);
+            if (s) setSearch(s);
+            if (p > 1) setPage(p);
+            if (u !== "User") setUserName(u);
+
+            const params = new URLSearchParams({
+                page: String(p),
+                pageSize: String(ROWS_PER_PAGE),
+                search: s,
+                branch: b,
+                count: "true",
+                stats: "true",
+                source: "mysql"
+            });
+            const cached = DataCache.get(`inventory_${params.toString()}`);
+            if (cached) {
+                setAllInventory(cached.data || []);
+                setTotalCount(cached.totalCount || 0);
+                setHasMore(!!cached.hasMore);
+                if (cached.globalStats) setGlobalStats(cached.globalStats);
+            }
+        });
     }, []);
 
     // Save filters to localStorage
@@ -161,10 +184,13 @@ export default function DashboardPage() {
         const fetchBranches = async () => {
             const cacheKey = "branches";
             const cached = DataCache.get(cacheKey);
-            if (cached) {
+            // Guard: only use cache if it's already the {id,name} format
+            if (cached && Array.isArray(cached) && cached.length > 0 && typeof cached[0] === "object" && cached[0].id) {
                 setBranchOptions(cached);
-                const mainBranch = cached.find(n => n.toUpperCase() === "MAIN") || cached.find(n => n.toUpperCase().includes("MAIN"));
-                if (mainBranch && !selectedBranch) setSelectedBranch(mainBranch);
+                if (!selectedBranch) {
+                    const main = cached.find(b => b.id.toUpperCase() === "MAIN") || cached.find(b => b.id.toUpperCase().includes("MAIN"));
+                    if (main) setSelectedBranch(main.id);
+                }
             }
 
             try {
@@ -172,14 +198,21 @@ export default function DashboardPage() {
                 if (res.ok) {
                     const data = await res.json();
                     const list = Array.isArray(data) ? data : (data?.value || []);
-                    const names = list.map((b) => b.SiteID || b.BranchName?.value).filter(Boolean);
-                    const unique = [...new Set(names)].sort();
-                    setBranchOptions(unique);
-                    DataCache.set(cacheKey, unique);
+                    const options = list
+                        .map(b => {
+                            const rawName = b.Description?.value || b.BranchName?.value || b.branch_name || "";
+                            const name = rawName && !rawName.startsWith("[object") ? rawName : (b.SiteID || b.branch_id || "");
+                            return { id: b.SiteID || b.branch_id || "", name };
+                        })
+                        .filter(b => b.id)
+                        .filter((b, i, arr) => arr.findIndex(x => x.id === b.id) === i)
+                        .sort((a, z) => a.name.localeCompare(z.name));
+                    setBranchOptions(options);
+                    DataCache.set(cacheKey, options);
 
                     if (!selectedBranch) {
-                        const mainBranch = unique.find(n => n.toUpperCase() === "MAIN") || unique.find(n => n.toUpperCase().includes("MAIN"));
-                        if (mainBranch) setSelectedBranch(mainBranch);
+                        const main = options.find(b => b.id.toUpperCase() === "MAIN") || options.find(b => b.id.toUpperCase().includes("MAIN"));
+                        if (main) setSelectedBranch(main.id);
                     }
                 }
             } catch (err) { console.error("Branch fetch error", err); }
@@ -191,7 +224,7 @@ export default function DashboardPage() {
     const fetchInventory = useCallback(async (isBackground = false) => {
         if (!isBackground) setLoading(true);
         try {
-            const dataParams = new URLSearchParams({ page: String(page), pageSize: String(ROWS_PER_PAGE), search: debouncedSearch, branch: selectedBranch, count: "true", stats: "true", source: "supabase" });
+            const dataParams = new URLSearchParams({ page: String(page), pageSize: String(ROWS_PER_PAGE), search: debouncedSearch, branch: selectedBranch, count: "true", stats: "true", source: "mysql" });
             const cacheKey = `inventory_${dataParams.toString()}`;
 
             const res = await fetch(`/api/inventory?${dataParams.toString()}`);
@@ -218,20 +251,15 @@ export default function DashboardPage() {
     }, [search]);
 
     useEffect(() => {
-        const dataParams = new URLSearchParams({ page: String(page), pageSize: String(ROWS_PER_PAGE), search: debouncedSearch, branch: selectedBranch, count: "true", stats: "true", source: "supabase" });
+        const dataParams = new URLSearchParams({ page: String(page), pageSize: String(ROWS_PER_PAGE), search: debouncedSearch, branch: selectedBranch, count: "true", stats: "true", source: "mysql" });
         const cacheKey = `inventory_${dataParams.toString()}`;
 
         const cached = DataCache.get(cacheKey);
         if (cached) {
-            setAllInventory(cached.data || []);
-            setTotalCount(cached.totalCount || 0);
-            setHasMore(!!cached.hasMore);
-            if (cached.globalStats) setGlobalStats(cached.globalStats);
-            setLoading(false);
             // Re-fetch in background
-            fetchInventory(true);
+            Promise.resolve().then(() => fetchInventory(true));
         } else {
-            fetchInventory(false);
+            Promise.resolve().then(() => fetchInventory(false));
         }
     }, [page, debouncedSearch, selectedBranch, fetchInventory]);
 
@@ -240,6 +268,11 @@ export default function DashboardPage() {
         if (parts.length >= 2) return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
         return userName.slice(0, 2).toUpperCase();
     }, [userName]);
+
+    const selectedBranchName = useMemo(() => {
+        if (!selectedBranch) return "All Branches";
+        return selectedBranch;
+    }, [selectedBranch]);
 
     /* ── Render ───────────────────────────────────────────── */
     return (
@@ -279,7 +312,7 @@ export default function DashboardPage() {
                             <IconFilter />
                             <select className="db-select" value={selectedBranch} onChange={(e) => { setSelectedBranch(e.target.value); setPage(1); }}>
                                 <option value="">All Branches</option>
-                                {branchOptions.map(b => <option key={b} value={b}>{b}</option>)}
+                                {branchOptions.map(b => <option key={b.id} value={b.id}>{b.id}</option>)}
                             </select>
                             <IconChevron />
                         </div>
@@ -310,6 +343,8 @@ export default function DashboardPage() {
                                     <th className="db-num">Price</th>
                                     <th>Class</th>
                                     <th>Status</th>
+                                    <th className="db-num">Qty Sold</th>
+                                    <th className="db-num">Total Sales</th>
                                 </tr>
                             </thead>
                             <tbody>

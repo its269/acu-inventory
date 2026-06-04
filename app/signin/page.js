@@ -109,7 +109,7 @@ export default function SignInPage() {
                 <div className="signin-header">
                     <div className="signin-logo-container">
                         <img
-                            src="/KELIN%20LOGO-01.png"
+                            src="https://kelin-website.vercel.app/KELIN-LOGO-01.png"
                             alt="Kelin Logo"
                             className="signin-logo-img"
                         />

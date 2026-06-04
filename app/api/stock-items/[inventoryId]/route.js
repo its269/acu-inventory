@@ -1,4 +1,4 @@
-import { SupabaseService } from "@/services/supabase";
+import { MySqlService } from "@/services/mysql";
 import { AcumaticaService } from "@/services/acumatica";
 import { getSession } from "@/lib/session-store";
 import { NextResponse } from "next/server";
@@ -21,23 +21,27 @@ export async function GET(request, { params }) {
         const { inventoryId: rawId } = await params;
         const inventoryId = decodeURIComponent(rawId);
 
-        // --- Try Supabase first ---
-        const detail = await SupabaseService.getProductStockDetail(inventoryId);
-
-        // Only trust Supabase if it has branch rows with actual quantities
-        const hasRealData = detail.branches.length > 0 && detail.branches.some(b => b.onHand > 0 || b.available > 0);
-        if (hasRealData) {
-            return NextResponse.json({ ...detail, source: "supabase" });
+        // --- Try MySQL first ---
+        console.log(`[Stock Item Detail API] Fetching from MySQL (db_purchase) for ${inventoryId}`);
+        const mysqlDetail = await MySqlService.getStockItemDetail(inventoryId);
+        
+        if (mysqlDetail && mysqlDetail.branches && mysqlDetail.branches.length > 0) {
+            return NextResponse.json({ ...mysqlDetail, source: "mysql" });
         }
 
         // --- Fallback: fetch live from Acumatica ---
         const sessionId = request.cookies.get("acu_session")?.value;
         const cookie = getSession(sessionId);
         if (!cookie) {
-            // No session — return Supabase partial data (product metadata only, no branches)
-            return NextResponse.json({ ...detail, source: "supabase", notice: "No active session for live branch data" });
+            return NextResponse.json({ 
+                ...(mysqlDetail || {}),
+                inventoryId,
+                error: mysqlDetail ? null : "Item not found in local database and no active ERP session",
+                source: mysqlDetail ? "mysql" : "error"
+            }, { status: mysqlDetail ? 200 : 401 });
         }
 
+        console.log(`[Stock Item Detail API] Fallback: Live fetch from Acumatica for ${inventoryId}`);
         const url = `${ACU_BASE}/StockItem?$filter=InventoryID eq '${encodeURIComponent(inventoryId)}'&$expand=WarehouseDetails`;
         const res = await AcumaticaService.fetchWithRetry(url, cookie);
         const data = await res.json();
@@ -45,36 +49,59 @@ export async function GET(request, { params }) {
         const item = items[0];
 
         if (!item) {
-            return NextResponse.json({ ...detail, source: "acumatica_notfound" });
+            return NextResponse.json({ error: "Item not found in Acumatica ERP" }, { status: 404 });
         }
 
-        const wds = item.WarehouseDetails || [];
+        const rawWds = item.WarehouseDetails || [];
+        const wds = Array.isArray(rawWds) ? rawWds : (rawWds.value || []);
+        
         const branches = wds
             .map(wh => ({
-                branchId: String(getF(wh, "WarehouseID")).trim(),
-                siteId: String(getF(wh, "WarehouseID")).trim(),
+                branchId: String(getF(wh, "WarehouseID") || getF(wh, "SiteID")).trim(),
+                siteId: String(getF(wh, "WarehouseID") || getF(wh, "SiteID")).trim(),
                 onHand: Number(getF(wh, "QtyOnHand") || 0),
                 available: Number(getF(wh, "QtyAvailable") || 0),
-                updatedAt: null,
+                updatedAt: new Date().toISOString(),
             }))
             .filter(b => b.branchId);
 
         const totalOnHand = branches.reduce((s, b) => s + b.onHand, 0);
         const totalAvailable = branches.reduce((s, b) => s + b.available, 0);
 
-        return NextResponse.json({
+        const result = {
             inventoryId,
-            description: String(getF(item, "Description")).trim() || detail.description,
-            itemClass: String(getF(item, "ItemClass")).trim() || detail.itemClass,
-            unitPrice: Number(getF(item, "DefaultPrice") || detail.unitPrice),
-            itemStatus: String(getF(item, "ItemStatus")).trim() || detail.itemStatus,
-            baseUnit: String(getF(item, "BaseUnit")).trim() || detail.baseUnit,
-            lastSync: null,
+            description: String(getF(item, "Description")).trim(),
+            itemClass: String(getF(item, "ItemClass")).trim(),
+            unitPrice: Number(getF(item, "DefaultPrice") || getF(item, "ListPrice") || 0),
+            itemStatus: String(getF(item, "ItemStatus")).trim(),
+            baseUnit: String(getF(item, "BaseUnit")).trim(),
+            lastSync: new Date().toISOString(),
             totalOnHand,
             totalAvailable,
             branches,
             source: "acumatica",
-        });
+        };
+
+        // Async upsert to MySQL so next time it's cached
+        try {
+            const levels = branches.map(b => ({
+                inventory_id: inventoryId,
+                branch_id: b.branchId,
+                site_id: b.siteId,
+                on_hand: b.onHand,
+                available: b.available,
+                description: result.description,
+                item_class: result.itemClass,
+                default_price: result.unitPrice,
+                item_status: result.itemStatus,
+                base_unit: result.baseUnit,
+            }));
+            await MySqlService.upsertInventoryLevels(levels);
+        } catch (dbErr) {
+            console.error("[Stock Item Detail API] Background upsert failed:", dbErr.message);
+        }
+
+        return NextResponse.json(result);
 
     } catch (err) {
         console.error("[Stock Item Detail API Error]", err);

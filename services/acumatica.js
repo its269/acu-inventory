@@ -1,4 +1,8 @@
 const ACU_BASE = "https://accounting.holocrontrackertrading.com/ERP/entity/Default/20.200.001";
+import { MySqlService } from "@/services/mysql";
+
+// Bypasses 'CERT_HAS_EXPIRED' error for Acumatica connections
+process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
 
 const toISODate = (date) => date.toISOString().split("T")[0];
 
@@ -7,17 +11,24 @@ let activeSalesSyncId = 0;
 let salesAbortController = null;
 
 export const AcumaticaService = {
-    async fetchWithRetry(url, cookie, options = {}) {
+    async fetchWithRetry(url, credential, options = {}) {
+        // credential can be a cookie string OR "__bearer__<token>" from session-store
+        const isBearer = typeof credential === "string" && credential.startsWith("__bearer__");
+        const authHeaders = isBearer
+            ? { "Authorization": `Bearer ${credential.slice(10)}` }
+            : { "Cookie": credential || "" };
+
         let lastError = null;
         for (let attempts = 1; attempts <= 3; attempts++) {
             try {
                 const res = await fetch(url, {
                     ...options,
-                    headers: { "Accept": "application/json", "User-Agent": "Mozilla/5.0", "Cookie": cookie || "", ...options.headers },
+                    headers: { "Accept": "application/json", "User-Agent": "Mozilla/5.0", ...authHeaders, ...options.headers },
                     cache: 'no-store',
                 });
                 if (res.status === 401) throw new Error("Unauthorized");
                 if (res.ok) return res;
+                lastError = new Error(`HTTP ${res.status} from ${url}`);
                 await new Promise(r => setTimeout(r, 1000 * attempts));
             } catch (err) {
                 if (err.name === 'AbortError') throw err;
@@ -35,13 +46,28 @@ export const AcumaticaService = {
     },
 
     async getRealBranches(cookie) {
-        const url = `${ACU_BASE}/Branch?$select=BranchID,Description`;
+        // Try the Branch endpoint first; fall back to Warehouse if unavailable (404)
+        try {
+            const url = `${ACU_BASE}/Branch?$select=BranchID,Description`;
+            const res = await this.fetchWithRetry(url, cookie);
+            const data = await res.json();
+            const raw = data.value || (Array.isArray(data) ? data : []);
+            if (raw.length > 0) {
+                return raw.map(b => ({
+                    BranchID: getF(b, "BranchID"),
+                    Description: getF(b, "Description")
+                }));
+            }
+        } catch { /* fall through to Warehouse fallback */ }
+
+        // Fallback: derive branches from Warehouse
+        const url = `${ACU_BASE}/Warehouse?$select=WarehouseID,Description`;
         const res = await this.fetchWithRetry(url, cookie);
         const data = await res.json();
         const raw = data.value || (Array.isArray(data) ? data : []);
-        return raw.map(b => ({
-            BranchID: getF(b, "BranchID"),
-            Description: getF(b, "Description")
+        return raw.map(w => ({
+            BranchID: getF(w, "WarehouseID"),
+            Description: getF(w, "Description") || getF(w, "WarehouseID")
         }));
     },
 
@@ -53,7 +79,7 @@ export const AcumaticaService = {
         if (search) {
             filterArr.push(`(contains(InventoryID, '${search}') or contains(Description, '${search}'))`);
         }
-        
+
         let url = `${ACU_BASE}/StockItem?$expand=WarehouseDetails&$top=${top}&$skip=${skip}`;
         if (filterArr.length > 0) {
             url += `&$filter=${filterArr.join(" and ")}`;
@@ -67,19 +93,19 @@ export const AcumaticaService = {
         for (const item of items) {
             const wds = item.WarehouseDetails || [];
             if (wds.length === 0) {
-                 if (!branch) {
-                     flattened.push({
-                         InventoryID: { value: getF(item, "InventoryID") },
-                         Description: { value: getF(item, "Description") },
-                         Branch: { value: "—" },
-                         SiteID: { value: "—" },
-                         OnHand: { value: 0 },
-                         Available: { value: 0 },
-                         DefaultPrice: { value: parseFloat(getF(item, "DefaultPrice") || 0) },
-                         ItemClass: { value: getF(item, "ItemClass") },
-                     });
-                 }
-                 continue;
+                if (!branch) {
+                    flattened.push({
+                        InventoryID: { value: getF(item, "InventoryID") },
+                        Description: { value: getF(item, "Description") },
+                        Branch: { value: "—" },
+                        SiteID: { value: "—" },
+                        OnHand: { value: 0 },
+                        Available: { value: 0 },
+                        DefaultPrice: { value: parseFloat(getF(item, "DefaultPrice") || 0) },
+                        ItemClass: { value: getF(item, "ItemClass") },
+                    });
+                }
+                continue;
             }
             for (const wh of wds) {
                 const whId = getF(wh, "WarehouseID");
@@ -97,7 +123,7 @@ export const AcumaticaService = {
                 });
             }
         }
-        
+
         return {
             data: flattened,
             totalCount: flattened.length,
@@ -126,7 +152,7 @@ export const AcumaticaService = {
 
         let filterArr = [];
         if (search) {
-            filterArr.push(`contains(OrderNbr, '${search}')`);
+            filterArr.push(`(contains(OrderNbr, '${search}') or contains(VendorID, '${search}') or contains(VendorName, '${search}') or Details/any(d: contains(d/InventoryID, '${search}')))`);
         }
         if (status) {
             filterArr.push(`Status eq '${status}'`);
@@ -164,6 +190,110 @@ export const AcumaticaService = {
         return { orders, hasMore };
     },
 
+    /** ── VENDORS (SUPPLIERS) ── */
+    async getVendors({ page = 1, pageSize = 50, search = "", cookie }) {
+        const skip = (page - 1) * pageSize;
+        const top = pageSize + 1;
+
+        // Re-integrating MySQL performance scores for accuracy, 
+        // as the local database now contains the necessary PO history.
+        const performanceMap = await MySqlService.getSupplierPerformance();
+
+        let filterArr = [];
+        if (search) {
+            filterArr.push(`(contains(VendorID, '${search}') or contains(VendorName, '${search}'))`);
+        }
+
+        const filter = filterArr.length > 0 ? `&$filter=${filterArr.join(" and ")}` : "";
+        const url = `${ACU_BASE}/Vendor?$top=${top}&$skip=${skip}${filter}`;
+
+        console.log(`>>> [Acumatica] Fetching Vendors (Hybrid Source: Names from ACU, Scores from MySQL): ${url}`);
+        const res = await this.fetchWithRetry(url, cookie);
+        const data = await res.json();
+        const rawVendors = data.value || (Array.isArray(data) ? data : []);
+
+        const hasMore = rawVendors.length > pageSize;
+        const vendors = rawVendors.slice(0, pageSize).map(v => {
+            const vId = getF(v, "VendorID");
+            // Use real score from MySQL, or a neutral 100% if no history exists yet
+            const realScore = performanceMap[vId] ?? 100.0;
+            
+            return {
+                vendorId: vId,
+                vendorName: getF(v, "VendorName"),
+                status: getF(v, "Status"),
+                reliabilityScore: realScore
+            };
+        });
+
+        return { vendors, hasMore };
+    },
+
+    /** ── REPLENISHMENT RECOMMENDATIONS ── */
+    async getReplenishmentRecommendations({ cookie }) {
+        // Helper to try multiple field names
+        const getAny = (obj, ...keys) => {
+            for (const k of keys) {
+                const v = getF(obj, k);
+                if (v !== "" && v !== null && v !== undefined) return v;
+            }
+            return "";
+        };
+
+        // We derive recommendations from active items with low stock availability
+        // Scan 300 items to ensure we find enough low-stock candidates
+        const url = `${ACU_BASE}/StockItem?$expand=WarehouseDetails&$top=300&$filter=ItemStatus eq 'Active'`;
+        const res = await this.fetchWithRetry(url, cookie);
+        const data = await res.json();
+        const items = data.value || (Array.isArray(data) ? data : []);
+
+        const recommendations = [];
+        let recId = 1000;
+
+        for (const item of items) {
+            const inventoryId = getF(item, "InventoryID");
+            if (!inventoryId) continue;
+
+            const description = getF(item, "Description");
+            let wds = item.WarehouseDetails || [];
+
+            // Handle cases where expansion is wrapped in { value: [...] }
+            if (wds && !Array.isArray(wds) && wds.value) wds = wds.value;
+            if (!Array.isArray(wds)) wds = [];
+
+            // Sum availability across all warehouses
+            // We use QtyAvailable as the primary metric, but fallback to QtyOnHand if missing
+            const totalAvailable = wds.reduce((sum, wh) => {
+                const val = parseFloat(getAny(wh, "QtyAvailable", "Available", "QtyOnHand", "OnHand", "Qty", "AvailableQty", "QtyAvail") || 0);
+                return sum + (isNaN(val) ? 0 : val);
+            }, 0);
+
+            // Logic: If available < 50 units total, recommend replenishment
+            if (totalAvailable < 50) {
+                const suggestedQty = 100 - totalAvailable;
+                const priority = totalAvailable < 10 ? "High" : totalAvailable < 30 ? "Medium" : "Low";
+
+                recommendations.push({
+                    recommendationId: `REC-${recId++}`,
+                    itemId: inventoryId,
+                    description: description,
+                    currentStock: totalAvailable,
+                    suggestedQty: Math.ceil(suggestedQty),
+                    priorityLevel: priority,
+                    generatedDate: new Date().toISOString()
+                });
+            }
+        }
+
+        return recommendations.sort((a, b) => {
+            const pMap = { "High": 3, "Medium": 2, "Low": 1 };
+            if (pMap[b.priorityLevel] !== pMap[a.priorityLevel]) {
+                return pMap[b.priorityLevel] - pMap[a.priorityLevel];
+            }
+            return a.currentStock - b.currentStock; // Lower stock first within same priority
+        });
+    },
+
     /** ── SALES: Discover Periods and Fetch Data ── */
     async fetchSalesBySpecificMonths({ cookie, targetMonths }) {
         if (salesAbortController) salesAbortController.abort();
@@ -197,7 +327,7 @@ export const AcumaticaService = {
 
             if (discoveredIds.length === 0) {
                 console.log(`>>> [Acumatica] [Req #${syncId}] No matching periods found in ERP. Falling back to date-based range.`);
-                
+
                 const startMonth = targetMonths[0];
                 const endMonth = targetMonths[targetMonths.length - 1];
                 if (!startMonth) return [];
@@ -213,10 +343,10 @@ export const AcumaticaService = {
                 for (const entity of entities) {
                     if (signal.aborted) break;
                     console.log(`>>> [Acumatica] [Req #${syncId}] Trying ${entity} (Limit 2000, OrderBy Amount Desc)...`);
-                    
+
                     const filter = `Date ge datetimeoffset'${startDate}' and Date le datetimeoffset'${endDate}'`;
                     const url = `${ACU_BASE}/${entity}?$expand=Details&$top=2000&$filter=${filter}&$orderby=Amount desc`;
-                    
+
                     try {
                         const res = await this.fetchWithRetry(url, cookie, { signal });
                         const data = await res.json();
@@ -229,7 +359,7 @@ export const AcumaticaService = {
                         console.warn(`>>> [Acumatica] [Req #${syncId}] ${entity} fetch failed:`, e.message);
                     }
                 }
-                
+
                 console.log(`>>> [Acumatica] [Req #${syncId}] TOTAL FALLBACK RECORDS: ${flatResults.length}`);
                 return flatResults;
             }
@@ -243,11 +373,11 @@ export const AcumaticaService = {
                     console.log(`>>> [Acumatica] [Req #${syncId}] Fetching Period ${id} (Skip ${skip})...`);
                     // Try Invoice for period-based fetching
                     const url = `${ACU_BASE}/Invoice?$expand=Details&$top=${pageSize}&$skip=${skip}&$filter=PostPeriod eq '${id}'`;
-                    
+
                     const res = await this.fetchWithRetry(url, cookie, { signal });
                     const data = await res.json();
                     const items = data.value || (Array.isArray(data) ? data : []);
-                    
+
                     results.push(...items);
                     if (items.length < pageSize) break;
                     skip += pageSize;

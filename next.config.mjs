@@ -1,5 +1,8 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
+  // mysql2 uses native Node.js modules — must not be bundled by Next.js
+  serverExternalPackages: ["mysql2"],
+
   // Standalone output: smallest possible production bundle
   // Nginx will serve /_next/static & /public directly — only SSR hits Node
   output: "standalone",
