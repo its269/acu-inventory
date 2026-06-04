@@ -1,5 +1,8 @@
 const ACU_BASE = "https://accounting.holocrontrackertrading.com/ERP/entity/Default/20.200.001";
 
+// Bypasses 'CERT_HAS_EXPIRED' error for Acumatica connections
+process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
+
 const toISODate = (date) => date.toISOString().split("T")[0];
 
 // --- SALES SYNC STATE MANAGEMENT ---

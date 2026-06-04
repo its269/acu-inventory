@@ -27,39 +27,48 @@ export async function GET(request) {
     try {
         const { searchParams } = new URL(request.url);
         const branch = searchParams.get("branch") || "";
-        const targetMonth = parseInt(searchParams.get("month"));
-        const targetYear = parseInt(searchParams.get("year"));
+        const asOfStr = searchParams.get("asOfDate") || new Date().toISOString().split('T')[0];
         const page = parseInt(searchParams.get("page") || "1");
         const pageSize = parseInt(searchParams.get("pageSize") || "15");
 
-        if (!targetMonth || !targetYear) {
-            return NextResponse.json({ message: "Month and Year are required" }, { status: 400 });
+        const asOf = new Date(asOfStr);
+        if (isNaN(asOf.getTime())) {
+            return NextResponse.json({ message: "Invalid As of Date" }, { status: 400 });
         }
 
-        // 1. Calculate the target 3 months
-        const targetMonths = [];
+        // Calculate three 30-day periods
+        const periods = [];
+        const labels = ["Last 30 Days", "31-60 Days Ago", "61-90 Days Ago"];
+        
         for (let i = 0; i < 3; i++) {
-            const d = new Date(targetYear, targetMonth - 1 + i, 1);
-            if (d > new Date()) break;
-            targetMonths.push({ 
-                month: d.getMonth() + 1, 
-                year: d.getFullYear(),
-                label: d.toLocaleString('default', { month: 'short', year: 'numeric' }),
-                key: `${String(d.getMonth() + 1).padStart(2, '0')}${d.getFullYear()}`
+            const end = new Date(asOf);
+            end.setDate(asOf.getDate() - (i * 30));
+            const start = new Date(end);
+            start.setDate(end.getDate() - 29);
+
+            const startStr = start.toISOString().split('T')[0];
+            const endStr = end.toISOString().split('T')[0];
+
+            periods.push({
+                key: `P${i + 1}`,
+                label: labels[i],
+                range: `${start.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })} - ${end.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}`,
+                start: startStr,
+                end: endStr
             });
         }
 
         // --- Try MySQL first ---
-        console.log(`[Sales Periodic API] Fetching from MySQL (db_purchase) for ${targetMonth}/${targetYear}`);
+        console.log(`[Sales Periodic API] Fetching 90-day analysis from MySQL as of ${asOfStr}`);
         const mysqlResult = await MySqlService.getSalesAnalysis({
             branch,
-            targetMonths
+            periods
         });
 
         if (mysqlResult && mysqlResult.data && mysqlResult.data.length > 0) {
             return NextResponse.json({
                 ...mysqlResult,
-                months: targetMonths.map(m => ({ key: m.key, label: m.label })),
+                months: periods.map(p => ({ key: p.key, label: p.label, range: p.range })),
                 pagination: {
                     totalItems: mysqlResult.data.length,
                     totalPages: Math.ceil(mysqlResult.data.length / pageSize)
@@ -73,19 +82,36 @@ export async function GET(request) {
         const cookie = getSession(sessionId);
         if (!cookie) return NextResponse.json({ message: "Unauthorized" }, { status: 401 });
 
-        console.log(`[Sales Periodic API] Fallback: Live fetch from Acumatica`);
-        const rawInvoices = await AcumaticaService.fetchSalesBySpecificMonths({
-            cookie,
-            targetMonths
-        });
+        console.log(`[Sales Periodic API] Fallback: Live fetch from Acumatica for 90 days`);
+        
+        // Fetch full 90-day range
+        const overallStart = periods[2].start;
+        const overallEnd = periods[0].end;
 
-        // Aggregation logic for live fetch (same as before)
+        const filter = `$filter=Date ge datetimeoffset'${overallStart}T00:00:00Z' and Date le datetimeoffset'${overallEnd}T23:59:59Z' and (Status eq 'Open' or Status eq 'Closed')`;
+        
+        let rawInvoices = [];
+        let skip = 0;
+        while (true) {
+            const url = `${ACU_BASE}/SalesInvoice?$expand=Details&$top=100&$skip=${skip}&${filter}&$orderby=Date desc`;
+            const res = await AcumaticaService.fetchWithRetry(url, cookie);
+            const data = await res.json();
+            const val = data.value || (Array.isArray(data) ? data : []);
+            rawInvoices = rawInvoices.concat(val);
+            if (val.length < 100) break;
+            skip += 100;
+        }
+
+        // Aggregation logic for live fetch
         const grouped = {};
         let totalRevenue = 0;
         let totalQtySold = 0;
 
         for (const inv of rawInvoices) {
-            let pKey = getAny(inv, "PostPeriod", "FinancialPeriod", "Period");
+            const dateStr = getAny(inv, "Date", "DocumentDate");
+            if (!dateStr) continue;
+            const docDate = new Date(dateStr).toISOString().split('T')[0];
+
             const hBranch = getAny(inv, "Branch", "BranchID", "SiteID", "LinkBranch");
             const rawDetails = inv.Details || inv.Transactions || inv.DocumentDetails || inv.value || [];
             const details = Array.isArray(rawDetails) ? rawDetails : (rawDetails.value || []);
@@ -107,20 +133,22 @@ export async function GET(request) {
                         totalQty: 0,
                         totalSales: 0
                     };
-                    targetMonths.forEach(m => { grouped[groupKey].monthlyData[m.key] = { qty: 0, sales: 0 }; });
+                    periods.forEach(p => { grouped[groupKey].monthlyData[p.key] = { qty: 0, sales: 0 }; });
                 }
 
                 let qty = Math.abs(Number(getAny(line, "Qty") || 0));
                 let sales = Math.abs(Number(getAny(line, "Amount") || 0));
 
-                if (grouped[groupKey].monthlyData[pKey]) {
-                    grouped[groupKey].monthlyData[pKey].qty += qty;
-                    grouped[groupKey].monthlyData[pKey].sales += sales;
+                // Assign to period
+                const period = periods.find(p => docDate >= p.start && docDate <= p.end);
+                if (period && grouped[groupKey].monthlyData[period.key]) {
+                    grouped[groupKey].monthlyData[period.key].qty += qty;
+                    grouped[groupKey].monthlyData[period.key].sales += sales;
+                    grouped[groupKey].totalQty += qty;
+                    grouped[groupKey].totalSales += sales;
+                    totalRevenue += sales;
+                    totalQtySold += qty;
                 }
-                grouped[groupKey].totalQty += qty;
-                grouped[groupKey].totalSales += sales;
-                totalRevenue += sales;
-                totalQtySold += qty;
             }
         }
 
@@ -128,7 +156,7 @@ export async function GET(request) {
 
         return NextResponse.json({
             data: finalResults,
-            months: targetMonths.map(m => ({ key: m.key, label: m.label })),
+            months: periods.map(p => ({ key: p.key, label: p.label, range: p.range })),
             metrics: { totalRevenue, uniqueProducts: finalResults.length, totalQtySold },
             pagination: {
                 totalItems: finalResults.length,

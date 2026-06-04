@@ -105,8 +105,9 @@ export default function QuickSyncModal({ isOpen, onClose, onStatusChange }) {
         onStatusChange?.("syncing");
 
         try {
+            const mode = syncType === "delta" ? "delta" : "incremental";
             const res = await fetch(
-                `/api/sync?inventory=${useInventory}&sales=${useSales}&mode=incremental`,
+                `/api/sync?inventory=${useInventory}&sales=${useSales}&mode=${mode}`,
                 { method: "POST" }
             );
 
@@ -223,21 +224,29 @@ export default function QuickSyncModal({ isOpen, onClose, onStatusChange }) {
                         /* ── Setup view ── */
                         <>
                             <h3 className="db-qs-section-title">Select sync strategy</h3>
-                            <div className="db-qs-strategy-grid">
+                            <div className="db-qs-strategy-grid" style={{ gridTemplateColumns: 'repeat(3, 1fr)' }}>
+                                <button
+                                    className={`db-qs-strategy-card ${syncType === "delta" ? "active" : ""}`}
+                                    onClick={() => setSyncType("delta")}
+                                >
+                                    <div className="db-qs-strategy-icon" style={{ color: '#0ea5e9' }}><IconRocket /></div>
+                                    <span className="db-qs-strategy-name">Sync Today's Changes</span>
+                                    <span className="db-qs-strategy-desc">New & Sold items</span>
+                                </button>
                                 <button
                                     className={`db-qs-strategy-card ${syncType === "all" ? "active" : ""}`}
                                     onClick={() => setSyncType("all")}
                                 >
-                                    <div className="db-qs-strategy-icon"><IconRocket /></div>
-                                    <span className="db-qs-strategy-name">Sync all modules</span>
-                                    <span className="db-qs-strategy-desc">All categories</span>
+                                    <div className="db-qs-strategy-icon"><IconSyncHeader /></div>
+                                    <span className="db-qs-strategy-name">Full Daily Refresh</span>
+                                    <span className="db-qs-strategy-desc">All 3,000+ items</span>
                                 </button>
                                 <button
                                     className={`db-qs-strategy-card ${syncType === "specific" ? "active" : ""}`}
                                     onClick={() => setSyncType("specific")}
                                 >
                                     <div className="db-qs-strategy-icon"><IconTarget /></div>
-                                    <span className="db-qs-strategy-name">Select specific</span>
+                                    <span className="db-qs-strategy-name">Custom Range</span>
                                     <span className="db-qs-strategy-desc">Choose modules</span>
                                 </button>
                             </div>

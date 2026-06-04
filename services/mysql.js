@@ -24,6 +24,21 @@ const purchasePool = mysql.createPool({
 
 export const MySqlService = {
     /**
+     * Get the latest last_sync timestamp from the database
+     */
+    async getLastSyncTime() {
+        try {
+            const [[res]] = await pool.query(
+                `SELECT MAX(last_sync) as lastSync FROM inventory_items WHERE last_sync IS NOT NULL`
+            );
+            return res.lastSync || null;
+        } catch (err) {
+            console.error("[MySQL getLastSyncTime Error]", err);
+            return null;
+        }
+    },
+
+    /**
      * Fetch inventory with pagination, search, and branch filtering (for Dashboard)
      */
     async getInventory({ page = 1, pageSize = 50, search = "", branch = "" }) {
@@ -492,73 +507,73 @@ export const MySqlService = {
     },
 
     /**
-     * Get 3-month comparative sales analysis from MySQL
+     * Get 90-day comparative sales analysis from MySQL (3 x 30-day periods)
      */
-    async getSalesAnalysis({ branch = "", targetMonths = [] }) {
+    async getSalesAnalysis({ branch = "", periods = [] }) {
         try {
-            if (targetMonths.length === 0) return { data: [], months: [], metrics: {} };
+            console.log(`[MySQL getSalesAnalysis] Params: branch="${branch}", periodsCount=${periods.length}`);
+            if (periods.length === 0) return { data: [], metrics: {} };
 
-            const monthKeys = targetMonths.map(m => `${String(m.month).padStart(2, '0')}${m.year}`);
-            const whereClauses = ["financial_period IN (?)"];
-            const params = [monthKeys];
+            // periods = [{ start: 'YYYY-MM-DD', end: 'YYYY-MM-DD', key: 'P1' }, ...]
+            const allDates = periods.flatMap(p => [p.start, p.end]);
+            const overallStart = allDates.reduce((a, b) => a < b ? a : b);
+            const overallEnd = allDates.reduce((a, b) => a > b ? a : b);
+
+            const whereClauses = ["s.document_date >= ?", "s.document_date <= ?"];
+            const params = [overallStart, overallEnd];
 
             if (branch && branch !== "All Branches") {
-                whereClauses.push("UPPER(branch_name) = UPPER(?)");
+                // Use a safe parameterized check
+                whereClauses.push("TRIM(UPPER(s.branch_name)) = TRIM(UPPER(?))");
                 params.push(branch);
             }
 
             const wherePart = `WHERE ${whereClauses.join(" AND ")}`;
 
-            const [rows] = await purchasePool.query(
-                `SELECT 
-                    inventory_id,
-                    branch_name,
-                    MAX(description) as description,
-                    financial_period as period,
-                    SUM(qty) as qty,
-                    SUM(total_amount) as sales
-                 FROM product_periodic_sales
-                 ${wherePart}
-                 GROUP BY inventory_id, branch_name, financial_period`,
-                params
-            );
+            // Build period bucket logic using CASE
+            const periodCases = periods.map(p => 
+                `SUM(CASE WHEN s.document_date >= '${p.start}' AND s.document_date <= '${p.end}' THEN s.qty ELSE 0 END) as qty_${p.key},
+                 SUM(CASE WHEN s.document_date >= '${p.start}' AND s.document_date <= '${p.end}' THEN s.total_amount ELSE 0 END) as sales_${p.key}`
+            ).join(",\n                    ");
 
-            // Group by Item + Branch
-            const grouped = {};
+            const query = `SELECT 
+                    s.inventory_id,
+                    s.branch_name,
+                    COALESCE(NULLIF(MAX(s.description), ''), MAX(i.inventory_name), '—') as description,
+                    ${periodCases}
+                 FROM product_periodic_sales s
+                 LEFT JOIN inventory_items i ON TRIM(UPPER(s.inventory_id)) = TRIM(UPPER(i.inventory_id))
+                 ${wherePart}
+                 GROUP BY s.inventory_id, s.branch_name`;
+
+            const [rows] = await purchasePool.query(query, params);
+            console.log(`[MySQL getSalesAnalysis] Success: ${rows.length} rows found.`);
+
             let totalRevenue = 0;
             let totalQtySold = 0;
 
-            for (const r of rows) {
-                const key = `${r.inventory_id}|${r.branch_name}`;
-                if (!grouped[key]) {
-                    grouped[key] = {
-                        inventoryId: r.inventory_id,
-                        branchName: r.branch_name,
-                        description: r.description || "—",
-                        monthlyData: {},
-                        totalQty: 0,
-                        totalSales: 0
-                    };
-                    monthKeys.forEach(mk => {
-                        grouped[key].monthlyData[mk] = { qty: 0, sales: 0 };
-                    });
-                }
+            const finalData = rows.map(r => {
+                const item = {
+                    inventoryId: r.inventory_id,
+                    branchName: r.branch_name,
+                    description: r.description,
+                    monthlyData: {},
+                    totalQty: 0,
+                    totalSales: 0
+                };
 
-                const qty = Number(r.qty) || 0;
-                const sales = Number(r.sales) || 0;
+                periods.forEach(p => {
+                    const q = Number(r[`qty_${p.key}`]) || 0;
+                    const s = Number(r[`sales_${p.key}`]) || 0;
+                    item.monthlyData[p.key] = { qty: q, sales: s };
+                    item.totalQty += q;
+                    item.totalSales += s;
+                });
 
-                if (grouped[key].monthlyData[r.period]) {
-                    grouped[key].monthlyData[r.period].qty = qty;
-                    grouped[key].monthlyData[r.period].sales = sales;
-                }
-
-                grouped[key].totalQty += qty;
-                grouped[key].totalSales += sales;
-                totalRevenue += sales;
-                totalQtySold += qty;
-            }
-
-            const finalData = Object.values(grouped).sort((a, b) => b.totalSales - a.totalSales);
+                totalRevenue += item.totalSales;
+                totalQtySold += item.totalQty;
+                return item;
+            }).sort((a, b) => b.totalSales - a.totalSales);
 
             return {
                 data: finalData,

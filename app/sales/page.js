@@ -44,11 +44,10 @@ export default function SalesPeriodicPage() {
 
     /* ── State ────────────────────────────────────────────── */
     const [selectedBranch, setSelectedBranch] = useState("");
-    const [targetMonth, setTargetMonth] = useState(new Date().getMonth() + 1);
-    const [targetYear, setTargetYear] = useState(currentYearNum);
+    const [targetDate, setTargetDate] = useState(new Date().toISOString().split('T')[0]);
     const [branchOptions, setBranchOptions] = useState([]);
     const [allSalesData, setAllSalesData] = useState([]);
-    const [months, setMonths] = useState([]);
+    const [periods, setPeriods] = useState([]);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState("");
     const [currentPage, setCurrentPage] = useState(1);
@@ -61,25 +60,19 @@ export default function SalesPeriodicPage() {
         Promise.resolve().then(() => {
             setMounted(true);
             const b = localStorage.getItem("sales_filter_branch") || "";
-            const m = localStorage.getItem("sales_filter_month");
-            const y = localStorage.getItem("sales_filter_year");
-
-            const finalMonth = m ? parseInt(m) : new Date().getMonth() + 1;
-            const finalYear = y ? parseInt(y) : currentYearNum;
+            const d = localStorage.getItem("sales_filter_date") || new Date().toISOString().split('T')[0];
 
             if (b) setSelectedBranch(b);
-            if (m) setTargetMonth(finalMonth);
-            if (y) setTargetYear(finalYear);
+            if (d) setTargetDate(d);
 
             const params = new URLSearchParams({
                 branch: b,
-                month: finalMonth.toString(),
-                year: finalYear.toString()
+                asOfDate: d
             });
-            const cached = DataCache.get(`sales_periodic_all_${params.toString()}`);
+            const cached = DataCache.get(`sales_90d_${params.toString()}`);
             if (cached) {
                 setAllSalesData(cached.data || []);
-                setMonths(cached.months || []);
+                setPeriods(cached.months || []);
                 setPagination(cached.pagination || { totalItems: 0, totalPages: 0 });
                 setMetrics(cached.metrics || { overallStocks: 0, totalRevenue: 0, uniqueProducts: 0, totalQtySold: 0 });
             }
@@ -97,9 +90,8 @@ export default function SalesPeriodicPage() {
     useEffect(() => {
         if (!mounted) return;
         localStorage.setItem("sales_filter_branch", selectedBranch);
-        localStorage.setItem("sales_filter_month", targetMonth.toString());
-        localStorage.setItem("sales_filter_year", targetYear.toString());
-    }, [selectedBranch, targetMonth, targetYear, mounted]);
+        localStorage.setItem("sales_filter_date", targetDate);
+    }, [selectedBranch, targetDate, mounted]);
 
     /* ── Fetch branches ─────────────────────────────────── */
     useEffect(() => {
@@ -129,10 +121,9 @@ export default function SalesPeriodicPage() {
             setLoading(true);
             setError("");
             setAllSalesData([]);
-            setMonths([]);
+            setPeriods([]);
             setCurrentPage(1);
 
-            // Scroll to top of table/toolbar for better context
             if (typeof window !== "undefined") {
                 window.scrollTo({ top: 0, behavior: 'smooth' });
             }
@@ -140,10 +131,9 @@ export default function SalesPeriodicPage() {
         try {
             const params = new URLSearchParams({
                 branch: selectedBranch,
-                month: targetMonth.toString(),
-                year: targetYear.toString(),
+                asOfDate: targetDate,
             });
-            const cacheKey = `sales_periodic_all_${params.toString()}`;
+            const cacheKey = `sales_90d_${params.toString()}`;
 
             const res = await fetch(`/api/sales-periodic?${params.toString()}`);
             if (res.status === 401) { router.push("/signin"); return; }
@@ -153,7 +143,7 @@ export default function SalesPeriodicPage() {
             }
             const result = await res.json();
             setAllSalesData(result.data || []);
-            setMonths(result.months || []);
+            setPeriods(result.months || []);
             setPagination(result.pagination || { totalItems: 0, totalPages: 0 });
             setMetrics(result.metrics || { overallStocks: 0, totalRevenue: 0, uniqueProducts: 0, totalQtySold: 0 });
             DataCache.set(cacheKey, result);
@@ -162,39 +152,38 @@ export default function SalesPeriodicPage() {
         } finally {
             setLoading(false);
         }
-    }, [selectedBranch, targetMonth, targetYear, router]);
+    }, [selectedBranch, targetDate, router]);
 
     useEffect(() => {
         if (!mounted) return;
         const params = new URLSearchParams({
             branch: selectedBranch,
-            month: targetMonth.toString(),
-            year: targetYear.toString()
+            asOfDate: targetDate
         });
-        const cacheKey = `sales_periodic_all_${params.toString()}`;
+        const cacheKey = `sales_90d_${params.toString()}`;
         const cached = DataCache.get(cacheKey);
         if (cached) {
             Promise.resolve().then(() => fetchSales(true));
         } else {
             Promise.resolve().then(() => fetchSales(false));
         }
-    }, [fetchSales, selectedBranch, targetMonth, targetYear, mounted]);
+    }, [fetchSales, selectedBranch, targetDate, mounted]);
 
     /* ── Export CSV ─────────────────────────────────────── */
     const exportCSV = useCallback(() => {
         const headers = ["Inventory ID", "Branch Name", "Description"];
-        months.forEach(m => {
-            headers.push(`${m.label} Qty`);
-            headers.push(`${m.label} Sales`);
+        periods.forEach(p => {
+            headers.push(`${p.label} Qty`);
+            headers.push(`${p.label} Sales`);
         });
-        headers.push("Total Qty");
-        headers.push("Total Sales");
+        headers.push("90-Day Total Qty");
+        headers.push("90-Day Total Sales");
 
         const rows = allSalesData.map((r) => {
             const row = [r.inventoryId, r.branchName, r.description];
-            months.forEach(m => {
-                row.push(r.monthlyData[m.key]?.qty || 0);
-                row.push(r.monthlyData[m.key]?.sales || 0);
+            periods.forEach(p => {
+                row.push(r.monthlyData[p.key]?.qty || 0);
+                row.push(r.monthlyData[p.key]?.sales || 0);
             });
             row.push(r.totalQty);
             row.push(r.totalSales);
@@ -206,10 +195,10 @@ export default function SalesPeriodicPage() {
         const url = URL.createObjectURL(blob);
         const a = document.createElement("a");
         a.href = url;
-        a.download = `sales-periodic-${selectedBranch || "all"}-${targetMonth}-${targetYear}.csv`;
+        a.download = `sales-90days-${selectedBranch || "all"}-${targetDate}.csv`;
         a.click();
         URL.revokeObjectURL(url);
-    }, [allSalesData, selectedBranch, targetMonth, targetYear, months]);
+    }, [allSalesData, selectedBranch, targetDate, periods]);
 
     return (
         <div className="db-root">
@@ -217,8 +206,8 @@ export default function SalesPeriodicPage() {
                 <div className="db-page-title">
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
                         <div>
-                            <h1>Product Periodic Sales</h1>
-                            <p>3-Month Comparative Sales Analysis based on Target Month. Fetched live from Acumatica.</p>
+                            <h1>90-Day Sales Analysis</h1>
+                            <p>Comparative sales performance over the last 90 days, divided into three 30-day blocks.</p>
                         </div>
                         <button className="db-action-btn" onClick={exportCSV} disabled={allSalesData.length === 0}>
                             <DownloadIcon /> Export CSV
@@ -228,19 +217,19 @@ export default function SalesPeriodicPage() {
 
                 <div className="db-stats">
                     <div className="db-stat-card db-stat-blue">
-                        <span className="db-stat-label">3M Total Volume</span>
+                        <span className="db-stat-label">90-Day Total Volume</span>
                         <span className="db-stat-value">{allSalesData.length > 0 ? metrics.totalQtySold.toLocaleString() : "—"}</span>
                         <span className="db-stat-sub">Units Sold</span>
                     </div>
                     <div className="db-stat-card">
-                        <span className="db-stat-label">3M Total Revenue</span>
+                        <span className="db-stat-label">90-Day Total Revenue</span>
                         <span className="db-stat-value">{allSalesData.length > 0 ? `₱${metrics.totalRevenue.toLocaleString(undefined, { minimumFractionDigits: 0 })}` : "—"}</span>
                         <span className="db-stat-sub">Gross Sales</span>
                     </div>
                     <div className="db-stat-card">
-                        <span className="db-stat-label">Analyzing For</span>
-                        <span className="db-stat-value" style={{ fontSize: '1.25rem' }}>{monthNames[targetMonth - 1]} {targetYear}</span>
-                        <span className="db-stat-sub">Target Period</span>
+                        <span className="db-stat-label">Reporting As Of</span>
+                        <span className="db-stat-value" style={{ fontSize: '1.25rem' }}>{new Date(targetDate).toLocaleDateString('en-PH', { month: 'long', day: 'numeric', year: 'numeric' })}</span>
+                        <span className="db-stat-sub">End Date</span>
                     </div>
                     <div className="db-stat-card">
                         <span className="db-stat-label">Scope</span>
@@ -252,34 +241,15 @@ export default function SalesPeriodicPage() {
                 <section className="db-toolbar" style={{ height: 'auto', padding: '1.25rem' }}>
                     <div className="db-toolbar-left" style={{ flexWrap: 'wrap', gap: '1.5rem' }}>
                         <div className="db-sales3m-filter-group">
-                            <label><CalendarIcon /> Target Month</label>
-                            <div className="db-select-wrapper" style={{ minWidth: '180px' }}>
-                                <select
-                                    className="db-select"
-                                    value={targetMonth}
-                                    onChange={(e) => setTargetMonth(parseInt(e.target.value))}
-                                >
-                                    {monthNames.map((name, i) => (
-                                        <option key={name} value={i + 1}>{name}</option>
-                                    ))}
-                                </select>
-                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" style={{ right: '0.9rem' }}><path d="m6 9 6 6 6-9" /></svg>
-                            </div>
-                        </div>
-
-                        <div className="db-sales3m-filter-group">
-                            <label>Year</label>
-                            <div className="db-select-wrapper" style={{ minWidth: '120px' }}>
-                                <select
-                                    className="db-select"
-                                    value={targetYear}
-                                    onChange={(e) => setTargetYear(parseInt(e.target.value))}
-                                >
-                                    {years.map(y => (
-                                        <option key={y} value={y}>{y}</option>
-                                    ))}
-                                </select>
-                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" style={{ right: '0.9rem' }}><path d="m6 9 6 6 6-9" /></svg>
+                            <label><CalendarIcon /> As of Date</label>
+                            <div className="db-date-wrapper" style={{ minWidth: '200px' }}>
+                                <input 
+                                    type="date" 
+                                    className="db-select" 
+                                    style={{ padding: '0.65rem 1rem' }}
+                                    value={targetDate}
+                                    onChange={(e) => setTargetDate(e.target.value)}
+                                />
                             </div>
                         </div>
 
@@ -316,7 +286,7 @@ export default function SalesPeriodicPage() {
                 {loading && allSalesData.length === 0 ? (
                     <div className="db-loading">
                         <div className="db-spinner db-spinner-lg"></div>
-                        <p>Fetching real-time data from Acumatica (This may take 1-2 minutes)...</p>
+                        <p>Aggregating 90-day data from database...</p>
                     </div>
                 ) : (
                     <>
@@ -327,17 +297,18 @@ export default function SalesPeriodicPage() {
                                         <th rowSpan={2} style={{ verticalAlign: 'middle' }}>Inventory ID</th>
                                         <th rowSpan={2} style={{ verticalAlign: 'middle' }}>Branch</th>
                                         <th rowSpan={2} style={{ verticalAlign: 'middle', width: '300px' }}>Description</th>
-                                        {months.map(m => (
-                                            <th key={m.key} colSpan={2} className="db-centered-header" style={{ textAlign: 'center' }}>
-                                                {m.label.toUpperCase()}
+                                        {periods.map(p => (
+                                            <th key={p.key} colSpan={2} className="db-centered-header" style={{ textAlign: 'center' }}>
+                                                <div style={{ fontSize: '0.85rem' }}>{p.label}</div>
+                                                <div style={{ fontSize: '0.65rem', fontWeight: '500', color: '#64748b', marginTop: '2px' }}>{p.range}</div>
                                             </th>
                                         ))}
-                                        <th rowSpan={2} className="db-num" style={{ verticalAlign: 'middle', fontWeight: '800' }}>TOTAL QTY</th>
-                                        <th rowSpan={2} className="db-num" style={{ verticalAlign: 'middle', fontWeight: '800' }}>TOTAL SALES</th>
+                                        <th rowSpan={2} className="db-num" style={{ verticalAlign: 'middle', fontWeight: '800' }}>90-DAY QTY</th>
+                                        <th rowSpan={2} className="db-num" style={{ verticalAlign: 'middle', fontWeight: '800' }}>90-DAY SALES</th>
                                     </tr>
                                     <tr>
-                                        {months.map(m => (
-                                            <Fragment key={`${m.key}-sub`}>
+                                        {periods.map(p => (
+                                            <Fragment key={`${p.key}-sub`}>
                                                 <th className="db-num" style={{ background: '#f8fafc', fontSize: '0.65rem' }}>QTY</th>
                                                 <th className="db-num" style={{ background: '#f0f9ff', fontSize: '0.65rem' }}>SALES</th>
                                             </Fragment>
@@ -347,9 +318,9 @@ export default function SalesPeriodicPage() {
                                 <tbody>
                                     {salesData.length === 0 ? (
                                         <tr>
-                                            <td colSpan={5 + (months.length * 2)} className="db-empty" style={{ textAlign: 'center', padding: '4rem' }}>
-                                                <p>No data found for the selected period.</p>
-                                                <span>Try selecting a different month or year.</span>
+                                            <td colSpan={5 + (periods.length * 2)} className="db-empty" style={{ textAlign: 'center', padding: '4rem' }}>
+                                                <p>No data found for the 90-day period ending on {targetDate}.</p>
+                                                <span>Try syncing more history or selecting a different date.</span>
                                             </td>
                                         </tr>
                                     ) : (
@@ -358,10 +329,10 @@ export default function SalesPeriodicPage() {
                                                 <td><code className="db-inv-id">{row.inventoryId}</code></td>
                                                 <td><span className="db-branch-tag">{row.branchName}</span></td>
                                                 <td className="db-desc" style={{ fontSize: '0.8rem' }}>{row.description}</td>
-                                                {months.map(m => (
-                                                    <Fragment key={m.key}>
-                                                        <td className="db-num">{(row.monthlyData[m.key]?.qty || 0).toLocaleString()}</td>
-                                                        <td className="db-num">₱{(row.monthlyData[m.key]?.sales || 0).toLocaleString(undefined, { minimumFractionDigits: 0 })}</td>
+                                                {periods.map(p => (
+                                                    <Fragment key={p.key}>
+                                                        <td className="db-num">{(row.monthlyData[p.key]?.qty || 0).toLocaleString()}</td>
+                                                        <td className="db-num">₱{(row.monthlyData[p.key]?.sales || 0).toLocaleString(undefined, { minimumFractionDigits: 0 })}</td>
                                                     </Fragment>
                                                 ))}
                                                 <td className="db-num" style={{ fontWeight: '700' }}>
@@ -380,7 +351,7 @@ export default function SalesPeriodicPage() {
                         {allSalesData.length > 0 && pagination.totalPages > 1 && (
                             <div className="db-pagination">
                                 <span className="db-page-info">
-                                    Showing <strong>{((currentPage - 1) * pageSize) + 1}</strong> to <strong>{Math.min(currentPage * pageSize, pagination.totalItems)}</strong> of <strong>{pagination.totalItems}</strong> unique products
+                                    Showing <strong>{((currentPage - 1) * pageSize) + 1}</strong> to <strong>{Math.min(currentPage * pageSize, pagination.totalItems)}</strong> of <strong>{pagination.totalItems}</strong> unique items
                                 </span>
                                 <div className="db-page-btns">
                                     <button 

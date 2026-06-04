@@ -3,6 +3,10 @@ const AUTH_BASE = `${ACU_HOST}/ERP/entity/auth`;
 const AUTH_URL = `${AUTH_BASE}/login`;
 const LOGOUT_URL = `${AUTH_BASE}/logout`;
 const TOKEN_URL = `${ACU_HOST}/identity/connect/token`;
+
+// Bypasses 'CERT_HAS_EXPIRED' error for Acumatica connections
+process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
+
 const COMMON_HEADERS = {
     "Accept": "application/json",
     "Content-Type": "application/json",

@@ -21,10 +21,11 @@ export async function POST(request) {
     if (!cookie) return NextResponse.json({ message: "Unauthorized" }, { status: 401 });
 
     const { searchParams } = new URL(request.url);
+    const mode = searchParams.get("mode") || "incremental";
     const options = {
         inventory: searchParams.get("inventory") === "true",
         sales: searchParams.get("sales") === "true",
-        mode: searchParams.get("mode") || "incremental",
+        mode: mode,
         startDate: searchParams.get("startDate"),
         endDate: searchParams.get("endDate"),
     };
@@ -36,11 +37,9 @@ export async function POST(request) {
                 controller.enqueue(encoder.encode(JSON.stringify(data) + "\n"));
             };
 
-            // Keep-alive: send a ping every 15s so the stream doesn't time out
-            // during long DB writes or slow Acumatica responses.
             const keepAlive = setInterval(() => {
                 if (!signal.aborted) {
-                    try { controller.enqueue(encoder.encode(JSON.stringify({ ping: true }) + "\n")); } catch { /* stream may be closed */ }
+                    try { controller.enqueue(encoder.encode(JSON.stringify({ ping: true }) + "\n")); } catch { }
                 }
             }, 15000);
             const finish = () => { clearInterval(keepAlive); controller.close(); };
@@ -63,194 +62,155 @@ export async function POST(request) {
 
             try {
                 const ACU_BASE = "https://accounting.holocrontrackertrading.com/ERP/entity/Default/20.200.001";
+                const isDelta = options.mode === "delta";
+                const todayStr = new Date().toISOString().split('T')[0];
 
+                // 1. BRANCHES (Always fast, sync every time)
+                send({ section: "Inventory", details: "Updating branches...", progress: 5 });
+                try {
+                    const branches = await AcumaticaService.getRealBranches(cookie);
+                    if (branches.length > 0) {
+                        await MySqlService.upsertBranches(branches.map(b => ({
+                            branch_id: String(b.BranchID).trim(),
+                            branch_name: String(b.Description || b.BranchID).trim(), active: true
+                        })));
+                    }
+                } catch (e) { }
+
+                // 2. INVENTORY
                 if (options.inventory) {
-                    let totalItems = 3000;
-                    try {
-                        const cRes = await AcumaticaService.fetchWithRetry(`${ACU_BASE}/StockItem?$count=true&$top=1`, cookie);
-                        const cData = await cRes.json();
-                        totalItems = parseInt(cData["@odata.count"] || cData["count"] || 0) || totalItems;
-                    } catch (e) { }
+                    if (isDelta) {
+                        send({ section: "Inventory", details: "Scanning for Today's changes...", progress: 10 });
+                        // In Delta mode, we only refresh inventory for items sold TODAY (near-instant)
+                    } else {
+                        send({ section: "Inventory", details: "Full Daily Refresh: Scanning 3,000+ items...", progress: 10 });
+                        let skip = 0, totalSynced = 0, top = 100;
+                        while (!signal.aborted) {
+                            const url = `${ACU_BASE}/StockItem?$expand=WarehouseDetails&$top=${top}&$skip=${skip}`;
+                            const res = await AcumaticaService.fetchWithRetry(url, cookie);
+                            const data = await res.json();
+                            const items = data.value || (Array.isArray(data) ? data : []);
+                            if (items.length === 0) break;
 
-                    // 1a. Branches
-                    send({ section: "Inventory", details: "Updating branches...", progress: 5 });
-                    try {
-                        const branches = await AcumaticaService.getRealBranches(cookie);
-                        if (branches.length > 0) {
-                            const bRows = branches.map(b => ({
-                                branch_id: String(b.BranchID).trim(),
-                                branch_name: String(b.Description || b.BranchID).trim(),
-                                active: true
-                            }));
-                            await MySqlService.upsertBranches(bRows);
-                        }
-                    } catch (bErr) {
-                        console.warn("[Sync] Branches step failed (non-fatal):", bErr?.message);
-                        send({ section: "Inventory", details: `Branches skipped: ${bErr?.message || "unavailable"}`, progress: 8 });
-                    }
-
-                    // 1b. Products
-                    send({ section: "Inventory", details: "Syncing product catalog...", progress: 10 });
-                    let pSkip = 0, pTotal = 0;
-                    while (!signal.aborted) {
-                        const res = await AcumaticaService.fetchWithRetry(`${ACU_BASE}/StockItem?$top=100&$skip=${pSkip}`, cookie);
-                        const data = await res.json();
-                        const raw = data.value || (Array.isArray(data) ? data : []);
-                        if (raw.length === 0) break;
-
-                        const rows = raw.map(item => {
-                            const invId = String(getF(item, "InventoryID")).trim();
-                            if (!invId) return null;
-                            return {
-                                inventory_id: invId,
-                                description: String(getF(item, "Description")).trim(),
-                                item_class: String(getF(item, "ItemClass")).trim(),
-                                default_price: parseFloat(String(getAny(item, "DefaultPrice", "ListPrice") || "0")) || 0,
-                                item_status: String(getAny(item, "ItemStatus") || "active").trim().toLowerCase(),
-                                base_unit: String(getAny(item, "BaseUnit") || "").trim(),
-                                item_type: String(getAny(item, "ItemType", "Type") || "").trim(),
-                                posting_class: String(getAny(item, "PostingClass") || "").trim(),
-                            };
-                        }).filter(Boolean);
-
-                        if (rows.length > 0) {
-                            await MySqlService.upsertInventoryItems(rows);
-                            pTotal += rows.length;
-                        }
-                        pSkip += raw.length;
-                        const pProg = 10 + Math.floor((pSkip / totalItems) * 30);
-                        send({ section: "Inventory", details: `Products: ${pTotal} synced...`, progress: Math.min(44, pProg) });
-                        if (raw.length < 100) break;
-                    }
-
-                    // 1c. Inventory levels
-                    send({ section: "Inventory", details: "Syncing stock levels...", progress: 45 });
-                    let lSkip = 0, lTotal = 0;
-                    while (!signal.aborted) {
-                        const res = await AcumaticaService.fetchWithRetry(`${ACU_BASE}/StockItem?$expand=WarehouseDetails&$top=40&$skip=${lSkip}`, cookie);
-                        const data = await res.json();
-                        const raw = data.value || (Array.isArray(data) ? data : []);
-                        if (raw.length === 0) break;
-
-                        const levels = [];
-                        for (const item of raw) {
-                            const invId = String(getF(item, "InventoryID")).trim();
-                            if (!invId) continue;
-                            let wds = item.WarehouseDetails || [];
-                            if (wds.value) wds = wds.value;
-                            if (!Array.isArray(wds)) continue;
-
-                            const description = String(getF(item, "Description")).trim();
-                            const item_class = String(getF(item, "ItemClass")).trim();
-                            const default_price = parseFloat(String(getAny(item, "DefaultPrice", "ListPrice") || "0")) || 0;
-                            const item_status = String(getAny(item, "ItemStatus") || "active").trim().toLowerCase();
-                            const base_unit = String(getAny(item, "BaseUnit") || "").trim();
-                            const item_type = String(getAny(item, "ItemType", "Type") || "").trim();
-                            const posting_class = String(getAny(item, "PostingClass") || "").trim();
-
-                            for (const wh of wds) {
-                                const whId = String(getAny(wh, "WarehouseID", "SiteID")).trim();
-                                if (!whId) continue;
-                                levels.push({
-                                    inventory_id: invId,
-                                    branch_id: whId,
-                                    site_id: whId,
-                                    on_hand: Number(getAny(wh, "QtyOnHand") || 0),
-                                    available: Number(getAny(wh, "QtyAvailable") || 0),
-                                    description,
-                                    item_class,
-                                    default_price,
-                                    item_status,
-                                    base_unit,
-                                    item_type,
-                                    posting_class,
+                            const levels = [];
+                            const catalogs = [];
+                            for (const item of items) {
+                                const invId = String(getF(item, "InventoryID")).trim();
+                                if (!invId) continue;
+                                const desc = String(getF(item, "Description")).trim();
+                                const itemClass = String(getF(item, "ItemClass")).trim();
+                                catalogs.push({
+                                    inventory_id: invId, description: desc, item_class: itemClass,
+                                    default_price: parseFloat(getF(item, "DefaultPrice") || 0),
+                                    item_status: String(getF(item, "ItemStatus") || "Active"),
+                                    base_unit: String(getF(item, "BaseUnit") || ""),
                                 });
+                                let wds = item.WarehouseDetails || [];
+                                if (wds.value) wds = wds.value;
+                                if (Array.isArray(wds)) {
+                                    for (const wh of wds) {
+                                        const whId = String(getAny(wh, "WarehouseID", "SiteID")).trim();
+                                        if (whId) levels.push({
+                                            inventory_id: invId, branch_id: whId, site_id: whId,
+                                            on_hand: Number(getAny(wh, "QtyOnHand") || 0),
+                                            available: Number(getAny(wh, "QtyAvailable") || 0),
+                                            description: desc, item_class: itemClass
+                                        });
+                                    }
+                                }
                             }
-                        }
-
-                        if (levels.length > 0) {
+                            await MySqlService.upsertInventoryItems(catalogs);
                             await MySqlService.upsertInventoryLevels(levels);
-                            lTotal += levels.length;
+                            totalSynced += items.length; skip += items.length;
+                            send({ section: "Inventory", details: `Processed ${totalSynced} items...`, progress: Math.min(99, 45) });
+                            if (items.length < top) break;
                         }
-                        lSkip += raw.length;
-                        const lProg = 45 + Math.floor((lSkip / totalItems) * 53);
-                        send({ section: "Inventory", details: `Levels: ${lTotal} rows...`, progress: Math.min(99, lProg) });
-                        if (raw.length < 40) break;
                     }
-                    send({ section: "Inventory", status: "done", details: `Complete! ${pTotal} products, ${lTotal} levels.`, progress: 100 });
                 }
 
+                // 3. SALES
+                const affectedInventoryIds = new Set();
                 if (options.sales) {
-                    send({ section: "Sales history", details: "Fetching sales from Acumatica...", progress: 0 });
-                    
-                    const startDate = options.startDate || "2024-01-01"; 
-                    const endDate = options.endDate || new Date().toISOString().split('T')[0];
+                    let sStart = options.startDate || "2024-01-01";
+                    if (isDelta) sStart = todayStr;
 
-                    let filterArr = [
-                        `Date ge datetimeoffset'${startDate}T00:00:00Z'`,
-                        `Date le datetimeoffset'${endDate}T23:59:59Z'`,
-                        `Status eq 'Open' or Status eq 'Closed'`
-                    ];
-                    
-                    const filter = `&$filter=${filterArr.join(" and ")}`;
+                    send({ section: "Sales history", details: isDelta ? "Syncing Today's sales..." : `Full Sync: Range ${sStart} to ${options.endDate || todayStr}`, progress: 50 });
+
+                    const filter = `$filter=Date ge datetimeoffset'${sStart}T00:00:00Z' and Date le datetimeoffset'${(options.endDate || todayStr)}T23:59:59Z' and (Status eq 'Open' or Status eq 'Closed')`;
                     let sSkip = 0, sTotal = 0;
-                    
                     while (!signal.aborted) {
-                        const url = `${ACU_BASE}/SalesInvoice?$expand=Details&$top=50&$skip=${sSkip}${filter}&$orderby=Date desc`;
+                        const url = `${ACU_BASE}/SalesInvoice?$expand=Details&$top=100&$skip=${sSkip}&${filter}&$orderby=Date desc`;
                         const res = await AcumaticaService.fetchWithRetry(url, cookie);
                         const data = await res.json();
-                        const rawInvoices = data.value || (Array.isArray(data) ? data : []);
-                        
-                        if (rawInvoices.length === 0) break;
+                        const invoices = data.value || [];
+                        if (invoices.length === 0) break;
 
                         const salesRows = [];
-                        for (const inv of rawInvoices) {
+                        for (const inv of invoices) {
                             const refNbr = getF(inv, "ReferenceNbr");
                             const branchName = getF(inv, "Branch");
-                            const orderType = getF(inv, "Type");
-                            const financialPeriod = getF(inv, "PostPeriod");
                             const docDate = getF(inv, "Date");
-                            
-                            const details = inv.Details || [];
-                            for (const line of details) {
-                                const lineNbr = getF(line, "LineNbr");
+                            for (const line of (inv.Details || [])) {
                                 const invId = getF(line, "InventoryID");
                                 if (!invId) continue;
-
+                                if (isDelta) affectedInventoryIds.add(invId);
                                 salesRows.push({
-                                    id: `${refNbr}-${lineNbr}`,
+                                    id: `${refNbr}-${getF(line, "LineNbr")}`,
                                     branch_name: branchName,
-                                    order_type: orderType,
-                                    financial_period: financialPeriod,
+                                    order_type: getF(inv, "Type"),
+                                    financial_period: getF(inv, "PostPeriod"),
                                     document_date: docDate ? docDate.split('T')[0] : null,
                                     description: getF(line, "Description"),
                                     qty: parseFloat(getF(line, "Qty") || 0),
                                     total_amount: parseFloat(getF(line, "Amount") || 0),
-                                    item_class: null,
                                     inventory_id: invId,
-                                    posting_class: null,
                                     last_sync: new Date(),
                                 });
                             }
                         }
-
-                        if (salesRows.length > 0) {
-                            await MySqlService.upsertPeriodicSales(salesRows);
-                            sTotal += salesRows.length;
-                        }
-                        
-                        sSkip += rawInvoices.length;
-                        send({ 
-                            section: "Sales history", 
-                            details: `Sales: ${sTotal} records synced...`, 
-                            progress: Math.min(99, Math.floor((sSkip / (sSkip + 50)) * 100)) 
-                        });
-                        
-                        if (rawInvoices.length < 50) break;
+                        if (salesRows.length > 0) await MySqlService.upsertPeriodicSales(salesRows);
+                        sTotal += invoices.length; sSkip += invoices.length;
+                        send({ section: "Sales history", details: `Synced ${sTotal} records...`, progress: 90 });
+                        if (invoices.length < 100) break;
                     }
-
-                    send({ section: "Sales history", status: "done", details: `Complete! ${sTotal} sales records synced.`, progress: 100 });
+                    send({ section: "Sales history", status: "done", details: "Sales sync complete.", progress: 100 });
                 }
+
+                // 4. SMART DELTA REFRESH (Only for items sold today)
+                if (isDelta && affectedInventoryIds.size > 0) {
+                    send({ section: "Inventory", details: `Updating stocks for ${affectedInventoryIds.size} sold items...`, progress: 95 });
+                    const idList = Array.from(affectedInventoryIds);
+                    const idChunks = [];
+                    for (let i = 0; i < idList.length; i += 10) idChunks.push(idList.slice(i, i + 10));
+
+                    for (const batch of idChunks) {
+                        const filter = batch.map(id => `InventoryID eq '${id}'`).join(" or ");
+                        const url = `${ACU_BASE}/StockItem?$expand=WarehouseDetails&$filter=${filter}`;
+                        const res = await AcumaticaService.fetchWithRetry(url, cookie);
+                        const data = await res.json();
+                        const items = data.value || [];
+                        const levels = [];
+                        for (const item of items) {
+                            const invId = String(getF(item, "InventoryID")).trim();
+                            let wds = item.WarehouseDetails || [];
+                            if (wds.value) wds = wds.value;
+                            if (Array.isArray(wds)) {
+                                for (const wh of wds) {
+                                    const whId = String(getAny(wh, "WarehouseID", "SiteID")).trim();
+                                    if (whId) levels.push({
+                                        inventory_id: invId, branch_id: whId, site_id: whId,
+                                        on_hand: Number(getAny(wh, "QtyOnHand") || 0),
+                                        available: Number(getAny(wh, "QtyAvailable") || 0),
+                                        description: String(getF(item, "Description")),
+                                        item_class: String(getF(item, "ItemClass"))
+                                    });
+                                }
+                            }
+                        }
+                        if (levels.length > 0) await MySqlService.upsertInventoryLevels(levels);
+                    }
+                }
+                if (isDelta) send({ section: "Inventory", status: "done", details: "Stock refresh complete.", progress: 100 });
 
                 send({ status: "complete", message: "Sync completed successfully" });
                 finish();
