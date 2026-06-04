@@ -54,6 +54,81 @@ export const MySqlService = {
     },
 
     /**
+     * Get the latest last_sync timestamp for Purchase Orders
+     */
+    async getLastPOSyncTime() {
+        try {
+            const [[res]] = await purchasePool.query(
+                `SELECT MAX(last_sync) as lastSync FROM purchase_history`
+            );
+            return res.lastSync || null;
+        } catch (err) {
+            console.error("[MySQL getLastPOSyncTime Error]", err);
+            return null;
+        }
+    },
+
+    /**
+     * Bulk upsert purchase history for reliability calculation
+     */
+    async upsertPurchaseHistory(rows) {
+        if (!rows.length) return;
+        const connection = await purchasePool.getConnection();
+        try {
+            await connection.beginTransaction();
+            const sql = `
+                INSERT INTO purchase_history 
+                (order_nbr, vendor_id, status, order_date, promised_date, receipt_date, total_amount, last_sync)
+                VALUES ?
+                ON DUPLICATE KEY UPDATE
+                status = VALUES(status),
+                promised_date = VALUES(promised_date),
+                receipt_date = VALUES(receipt_date),
+                total_amount = VALUES(total_amount),
+                last_sync = VALUES(last_sync)
+            `;
+            const values = rows.map(r => [
+                r.order_nbr, r.vendor_id, r.status, r.order_date, r.promised_date, r.receipt_date, r.total_amount, new Date()
+            ]);
+            await connection.query(sql, [values]);
+            await connection.commit();
+        } catch (err) {
+            await connection.rollback();
+            throw err;
+        } finally {
+            connection.release();
+        }
+    },
+
+    /**
+     * Get calculated reliability scores for all vendors
+     */
+    async getSupplierPerformance() {
+        try {
+            const [rows] = await purchasePool.query(`
+                SELECT 
+                    vendor_id,
+                    COUNT(*) as total_orders,
+                    SUM(CASE WHEN receipt_date > promised_date THEN 1 ELSE 0 END) as late_orders,
+                    ROUND(
+                        (SUM(CASE WHEN receipt_date <= promised_date THEN 1 ELSE 0 END) / COUNT(*)) * 100, 
+                        1
+                    ) as reliability_score
+                FROM purchase_history
+                WHERE status IN ('Closed', 'Completed') AND promised_date IS NOT NULL AND receipt_date IS NOT NULL
+                GROUP BY vendor_id
+            `);
+            return rows.reduce((acc, row) => {
+                acc[row.vendor_id] = row.reliability_score;
+                return acc;
+            }, {});
+        } catch (err) {
+            console.error("[MySQL getSupplierPerformance Error]", err);
+            return {};
+        }
+    },
+
+    /**
      * Fetch inventory with pagination, search, and branch filtering (for Dashboard)
      */
     async getInventory({ page = 1, pageSize = 50, search = "", branch = "" }) {
@@ -348,11 +423,6 @@ export const MySqlService = {
 
     /**
      * Bulk-update catalog fields on existing inventory_items rows.
-     * Uses INSERT ... ON DUPLICATE KEY UPDATE so a single SQL statement handles
-     * the whole batch — avoids row-by-row UPDATE timeouts on large catalogs.
-     * default_warehouse is set to '' as a placeholder; the UNIQUE KEY
-     * (inventory_id, default_warehouse) means this won't conflict with real
-     * warehouse rows, and existing rows keep their real default_warehouse.
      */
     async upsertInventoryItems(items) {
         if (!items.length) return;
@@ -367,7 +437,7 @@ export const MySqlService = {
                 const placeholders = chunk.map(() => '(?,?,?,?,?,?,?,?,?,?)').join(',');
                 const values = chunk.flatMap(item => [
                     item.inventory_id,
-                    '__catalog__',          // sentinel warehouse — never shown
+                    '__catalog__',
                     item.description,
                     item.item_class,
                     safeNum(item.default_price),
@@ -380,9 +450,9 @@ export const MySqlService = {
                 await connection.query(
                     `INSERT INTO inventory_items
                         (inventory_id, default_warehouse, inventory_name, item_class,
-                         default_price, item_status, base_unit, type, posting_class, last_sync)
-                     VALUES ${placeholders}
-                     ON DUPLICATE KEY UPDATE
+                        default_price, item_status, base_unit, type, posting_class, last_sync)
+                    VALUES ${placeholders}
+                    ON DUPLICATE KEY UPDATE
                         inventory_name = VALUES(inventory_name),
                         item_class     = VALUES(item_class),
                         default_price  = VALUES(default_price),
@@ -405,9 +475,7 @@ export const MySqlService = {
     },
 
     /**
-     * Bulk upsert inventory levels — INSERT new rows or UPDATE on_hand/available
-     * on existing rows via uq_inv_warehouse (inventory_id, default_warehouse).
-     * Uses chunked multi-row INSERT for performance.
+     * Bulk upsert inventory levels.
      */
     async upsertInventoryLevels(levels) {
         if (!levels.length) return;
@@ -439,10 +507,10 @@ export const MySqlService = {
                 await connection.query(
                     `INSERT INTO inventory_items
                         (inventory_id, default_warehouse, inventory_name, item_class,
-                         default_price, item_status, base_unit, type, posting_class,
-                         branch_id, site_id, on_hand, available, last_sync)
-                     VALUES ${placeholders}
-                     ON DUPLICATE KEY UPDATE
+                        default_price, item_status, base_unit, type, posting_class,
+                        branch_id, site_id, on_hand, available, last_sync)
+                    VALUES ${placeholders}
+                    ON DUPLICATE KEY UPDATE
                         on_hand        = VALUES(on_hand),
                         available      = VALUES(available),
                         branch_id      = VALUES(branch_id),
@@ -515,6 +583,35 @@ export const MySqlService = {
         } catch (err) {
             await connection.rollback();
             console.error("[MySQL upsertPeriodicSales Error]", err);
+            throw err;
+        } finally {
+            connection.release();
+        }
+    },
+
+    /**
+     * Post-sync enrichment: Fill missing item_class and posting_class in sales table
+     * by joining with the inventory catalog.
+     */
+    async enrichSalesData() {
+        const connection = await purchasePool.getConnection();
+        try {
+            console.log(">>> [MySQL] Starting Sales Data Enrichment...");
+            // Update item_class and posting_class from inventory_items catalog where missing
+            const sql = `
+                UPDATE product_periodic_sales s
+                JOIN inventory_items i ON TRIM(UPPER(s.inventory_id)) = TRIM(UPPER(i.inventory_id))
+                SET 
+                    s.item_class = COALESCE(s.item_class, i.item_class),
+                    s.posting_class = COALESCE(s.posting_class, i.posting_class)
+                WHERE (s.item_class IS NULL OR s.posting_class IS NULL)
+                AND i.default_warehouse = '__catalog__'
+            `;
+            const [res] = await connection.query(sql);
+            console.log(`>>> [MySQL] Enrichment complete. Rows updated: ${res.affectedRows}`);
+            return res.affectedRows;
+        } catch (err) {
+            console.error("[MySQL enrichSalesData Error]", err);
             throw err;
         } finally {
             connection.release();

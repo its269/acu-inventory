@@ -98,17 +98,30 @@ export default function SalesPeriodicPage() {
         const fetchBranches = async () => {
             const cacheKey = "branches";
             const cached = DataCache.get(cacheKey);
-            if (cached) setBranchOptions(cached);
+            
+            // Handle both legacy string cache and new object cache
+            if (cached && Array.isArray(cached) && cached.length > 0) {
+                const normalized = cached.map(b => typeof b === 'string' ? { id: b, name: b } : b);
+                setBranchOptions(normalized);
+            }
 
             try {
                 const res = await fetch("/api/branches");
                 if (res.ok) {
                     const data = await res.json();
                     const list = Array.isArray(data) ? data : (data?.value || []);
-                    const names = list.map((b) => b.SiteID || b.BranchName?.value || b.BranchID?.value).filter(Boolean);
-                    const unique = [...new Set(names)].sort();
-                    setBranchOptions(unique);
-                    DataCache.set(cacheKey, unique);
+                    
+                    const options = list.map(b => {
+                        const rawName = b.Description?.value || b.BranchName?.value || b.branch_name || "";
+                        const name = rawName && !rawName.startsWith("[object") ? rawName : (b.SiteID || b.branch_id || "");
+                        return { id: b.SiteID || b.branch_id || "", name };
+                    })
+                    .filter(b => b.id)
+                    .filter((b, i, arr) => arr.findIndex(x => x.id === b.id) === i)
+                    .sort((a, z) => a.name.localeCompare(z.name));
+
+                    setBranchOptions(options);
+                    DataCache.set(cacheKey, options);
                 }
             } catch { }
         };
@@ -259,7 +272,7 @@ export default function SalesPeriodicPage() {
                                 <select className="db-select" value={selectedBranch} onChange={(e) => setSelectedBranch(e.target.value)}>
                                     <option value="">All Branches</option>
                                     {branchOptions.map((b) => (
-                                        <option key={b} value={b}>{b}</option>
+                                        <option key={b.id || b} value={b.id || b}>{b.name || b}</option>
                                     ))}
                                 </select>
                                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" style={{ right: '0.9rem' }}><path d="m6 9 6 6 6-9" /></svg>

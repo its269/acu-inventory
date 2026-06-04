@@ -136,7 +136,7 @@ export default function Sidebar() {
         <div className="sidebar-header">
           <div className="sidebar-brand">
             <span className="sidebar-logo">
-              <img src="/kelin-logo.png" alt="KGS Logo" style={{ width: '38px', marginLeft: '4px' }} crossOrigin="anonymous" />
+              <img src="https://kelin-website.vercel.app/KELIN-LOGO-01.png" alt="KGS Logo" style={{ width: '38px', marginLeft: '4px' }} />
             </span>
             {!isCollapsed && <span>KGS PURCHASE</span>}
           </div>

@@ -1,4 +1,5 @@
 const ACU_BASE = "https://accounting.holocrontrackertrading.com/ERP/entity/Default/20.200.001";
+import { MySqlService } from "@/services/mysql";
 
 // Bypasses 'CERT_HAS_EXPIRED' error for Acumatica connections
 process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
@@ -194,6 +195,10 @@ export const AcumaticaService = {
         const skip = (page - 1) * pageSize;
         const top = pageSize + 1;
 
+        // Re-integrating MySQL performance scores for accuracy, 
+        // as the local database now contains the necessary PO history.
+        const performanceMap = await MySqlService.getSupplierPerformance();
+
         let filterArr = [];
         if (search) {
             filterArr.push(`(contains(VendorID, '${search}') or contains(VendorName, '${search}'))`);
@@ -202,18 +207,24 @@ export const AcumaticaService = {
         const filter = filterArr.length > 0 ? `&$filter=${filterArr.join(" and ")}` : "";
         const url = `${ACU_BASE}/Vendor?$top=${top}&$skip=${skip}${filter}`;
 
-        console.log(`>>> [Acumatica] Fetching Vendors: ${url}`);
+        console.log(`>>> [Acumatica] Fetching Vendors (Hybrid Source: Names from ACU, Scores from MySQL): ${url}`);
         const res = await this.fetchWithRetry(url, cookie);
         const data = await res.json();
         const rawVendors = data.value || (Array.isArray(data) ? data : []);
 
         const hasMore = rawVendors.length > pageSize;
-        const vendors = rawVendors.slice(0, pageSize).map(v => ({
-            vendorId: getF(v, "VendorID"),
-            vendorName: getF(v, "VendorName"),
-            status: getF(v, "Status"),
-            reliabilityScore: parseFloat(getF(v, "ReliabilityScore") || (Math.random() * 20 + 80).toFixed(1)) // Mock if not in API
-        }));
+        const vendors = rawVendors.slice(0, pageSize).map(v => {
+            const vId = getF(v, "VendorID");
+            // Use real score from MySQL, or a neutral 100% if no history exists yet
+            const realScore = performanceMap[vId] ?? 100.0;
+            
+            return {
+                vendorId: vId,
+                vendorName: getF(v, "VendorName"),
+                status: getF(v, "Status"),
+                reliabilityScore: realScore
+            };
+        });
 
         return { vendors, hasMore };
     },
