@@ -1,7 +1,13 @@
 import { supabase } from "@/lib/supabase";
 import { NextResponse } from "next/server";
 
+export const dynamic = "force-dynamic";
+
 export async function GET(request, { params }) {
+    if (!supabase) {
+        return NextResponse.json({ error: "Supabase client not initialized. Check environment variables." }, { status: 500 });
+    }
+
     const { inventoryId: rawId } = await params;
     const inventoryId = decodeURIComponent(rawId);
 

@@ -14,6 +14,10 @@ const BATCH_SIZE = 1000;
  * Auth-protected via acu_session cookie.
  */
 export async function POST(request) {
+    if (!supabaseAdmin) {
+        return NextResponse.json({ error: "Supabase admin client not initialized. Check environment variables." }, { status: 500 });
+    }
+
     const sessionId = request.cookies.get("acu_session")?.value;
     const cookie = getSession(sessionId);
     if (!cookie) {
