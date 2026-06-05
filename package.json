@@ -11,6 +11,7 @@
     "deploy": "npm run build && npm run start:prod"
   },
   "dependencies": {
+    "@supabase/supabase-js": "^2.105.4",
     "mysql2": "^3.22.4",
     "next": "16.2.6",
     "react": "19.2.4",
