@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { getSession } from "@/lib/session-store";
-import { supabaseAdmin } from "@/lib/supabase";
+import { getSupabaseAdmin } from "@/lib/supabase";
 import { MySqlService } from "@/services/mysql";
 
 export const runtime = "nodejs";
@@ -14,6 +14,11 @@ const BATCH_SIZE = 1000;
  * Auth-protected via acu_session cookie.
  */
 export async function POST(request) {
+    const supabaseAdmin = getSupabaseAdmin();
+    if (!supabaseAdmin) {
+        return NextResponse.json({ error: "Supabase admin client not initialized. Check environment variables." }, { status: 500 });
+    }
+
     const sessionId = request.cookies.get("acu_session")?.value;
     const cookie = getSession(sessionId);
     if (!cookie) {

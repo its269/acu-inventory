@@ -148,9 +148,11 @@ export async function POST(request) {
                         await MySqlService.upsertInventoryItems(catalogs);
                         await MySqlService.upsertInventoryLevels(levels);
                         totalSynced += items.length; skip += items.length;
-                        send({ section: "Inventory", details: `Processed ${totalSynced} items...`, progress: Math.min(99, 45) });
+                        const invProgress = Math.min(95, 10 + Math.floor(totalSynced / 20));
+                        send({ section: "Inventory", details: `Processed ${totalSynced} items...`, progress: invProgress, count: totalSynced });
                         if (items.length < top) break;
                     }
+                    send({ section: "Inventory", status: "done", details: `Inventory sync complete.`, progress: 100 });
                 }
 
                 // 3. SALES
@@ -159,11 +161,11 @@ export async function POST(request) {
                     const filterArr = [];
                     if (isDelta && lastSalesSync) {
                         filterArr.push(`LastModifiedDateTime gt datetimeoffset'${lastSalesSync}'`);
-                        send({ section: "Sales history", details: `Incremental Sync: Fetching changes since ${lastSalesSync}...`, progress: 50 });
+                        send({ section: "Sales history", details: `Incremental Sync: Fetching changes since ${lastSalesSync}...`, progress: 10 });
                     } else {
                         let sStart = options.startDate || "2024-01-01";
                         filterArr.push(`Date ge datetimeoffset'${sStart}T00:00:00Z' and Date le datetimeoffset'${(options.endDate || todayStr)}T23:59:59Z'`);
-                        send({ section: "Sales history", details: `Full Sync: Range ${sStart} to ${options.endDate || todayStr}`, progress: 50 });
+                        send({ section: "Sales history", details: `Full Sync: Range ${sStart} to ${options.endDate || todayStr}`, progress: 10 });
                     }
 
                     const filterStr = `$filter=${filterArr.join(" and ")}`;
@@ -180,7 +182,11 @@ export async function POST(request) {
                             const refNbr = getF(inv, "ReferenceNbr");
                             const branchName = getF(inv, "Branch");
                             const docDate = getF(inv, "Date");
-                            for (const line of (inv.Details || [])) {
+                            
+                            let details = inv.Details || [];
+                            if (details.value) details = details.value;
+                            
+                            for (const line of details) {
                                 const invId = getF(line, "InventoryID");
                                 if (!invId) continue;
                                 if (options.mode === "delta") affectedInventoryIds.add(invId);
@@ -190,7 +196,7 @@ export async function POST(request) {
                                     order_type: getF(inv, "Type"),
                                     financial_period: getF(inv, "PostPeriod"),
                                     document_date: docDate ? docDate.split('T')[0] : null,
-                                    description: getF(line, "Description"),
+                                    description: getAny(line, "TransactionDescription", "Description"),
                                     qty: parseFloat(getF(line, "Qty") || 0),
                                     total_amount: parseFloat(getF(line, "Amount") || 0),
                                     inventory_id: invId,
@@ -200,7 +206,8 @@ export async function POST(request) {
                         }
                         if (salesRows.length > 0) await MySqlService.upsertPeriodicSales(salesRows);
                         sTotal += invoices.length; sSkip += invoices.length;
-                        send({ section: "Sales history", details: `Synced ${sTotal} records...`, progress: 90 });
+                        const salesProg = Math.min(95, 10 + Math.floor(sTotal / 2));
+                        send({ section: "Sales history", details: `Synced ${sTotal} records...`, progress: salesProg, count: sTotal });
                         if (invoices.length < 100) break;
                     }
                     send({ section: "Sales history", status: "done", details: "Sales sync complete.", progress: 100 });
@@ -239,8 +246,19 @@ export async function POST(request) {
                         }
                         if (levels.length > 0) await MySqlService.upsertInventoryLevels(levels);
                     }
+                    send({ section: "Inventory", status: "done", details: "Stock refresh complete.", progress: 100 });
                 }
-                if (isDelta) send({ section: "Inventory", status: "done", details: "Stock refresh complete.", progress: 100 });
+
+                // 5. FINAL ENRICHMENT (Optional but recommended for full data accuracy)
+                if (options.sales || options.inventory) {
+                    send({ section: "Data Enrichment", details: "Filling missing categories...", progress: 98 });
+                    try {
+                        await MySqlService.enrichSalesData();
+                    } catch (e) {
+                        console.error(">>> [Sync API] Enrichment error:", e);
+                    }
+                    send({ section: "Data Enrichment", status: "done", details: "Enrichment complete.", progress: 100 });
+                }
 
                 send({ status: "complete", message: "Sync completed successfully" });
                 finish();

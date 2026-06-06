@@ -1,6 +1,6 @@
 "use client";
 
-import { Fragment, useState, useEffect, useCallback } from "react";  
+import { Fragment, useState, useEffect, useCallback, useRef } from "react";  
 import { DataCache } from "@/lib/data-cache";
 import InventoryDetailModal from "@/components/InventoryDetailModal";
 import "@/styles/dashboard.css";
@@ -61,21 +61,25 @@ export default function IncomingPOPage() {
     const [expanded, setExpanded] = useState({}); // orderNbr -> bool
     const [selectedId, setSelectedId] = useState(null);
 
+    const isInitialMount = useRef(true);
+
     // Initial restoration & Hydration fix
     useEffect(() => {
-        Promise.resolve().then(() => {
-            const savedPage = parseInt(localStorage.getItem("inc_po_filter_page") || "1");
-            const savedSearch = localStorage.getItem("inc_po_filter_search") || "";
-            const savedStart = localStorage.getItem("inc_po_filter_startDate") || "";
-            const savedStatus = localStorage.getItem("inc_po_filter_status") || "Open";
+        const savedPage = localStorage.getItem("inc_po_filter_page");
+        const initialPage = savedPage ? parseInt(savedPage) : 1;
+        
+        const savedSearch = localStorage.getItem("inc_po_filter_search") || "";
+        const savedStart = localStorage.getItem("inc_po_filter_startDate") || "";
+        const savedStatus = localStorage.getItem("inc_po_filter_status") || "Open";
 
-            if (savedPage > 1) setPage(savedPage);
-            if (savedSearch) setSearch(savedSearch);
-            if (savedStart) setStartDate(savedStart);
-            if (savedStatus !== "Open") setStatus(savedStatus);
+        Promise.resolve().then(() => {
+            setPage(initialPage);
+            setSearch(savedSearch);
+            setStartDate(savedStart);
+            setStatus(savedStatus);
 
             const params = new URLSearchParams({
-                page: String(savedPage),
+                page: String(initialPage),
                 pageSize: String(PAGE_SIZE),
                 startDate: savedStart,
                 status: savedStatus
@@ -85,15 +89,18 @@ export default function IncomingPOPage() {
                 setOrders(cached.orders ?? []);
                 setHasMore(cached.hasMore ?? false);
             }
+            isInitialMount.current = false;
         });
     }, []);
 
     // Save filters to localStorage
     useEffect(() => {
-        localStorage.setItem("inc_po_filter_page", page.toString());
-        localStorage.setItem("inc_po_filter_search", search);
-        localStorage.setItem("inc_po_filter_startDate", startDate);
-        localStorage.setItem("inc_po_filter_status", status);
+        if (!isInitialMount.current) {
+            localStorage.setItem("inc_po_filter_page", page.toString());
+            localStorage.setItem("inc_po_filter_search", search);
+            localStorage.setItem("inc_po_filter_startDate", startDate);
+            localStorage.setItem("inc_po_filter_status", status);
+        }
     }, [page, search, startDate, status]);
 
     useEffect(() => {
@@ -102,7 +109,8 @@ export default function IncomingPOPage() {
     }, [search]);
 
     useEffect(() => {
-        Promise.resolve().then(() => setPage(1));
+        if (isInitialMount.current) return;
+        setPage(1);
     }, [debSearch, startDate, status]);
 
     const fetchOrders = useCallback(async (isBackground = false) => {
@@ -220,6 +228,27 @@ export default function IncomingPOPage() {
                                 value={search}
                                 onChange={e => setSearch(e.target.value)}
                             />
+                            {search && (
+                                <button 
+                                    className="db-search-clear"
+                                    onClick={() => setSearch("")}
+                                    style={{ 
+                                        position: 'absolute', 
+                                        right: '1rem', 
+                                        background: 'none', 
+                                        border: 'none', 
+                                        color: '#94a3b8', 
+                                        cursor: 'pointer',
+                                        fontSize: '1.2rem',
+                                        display: 'flex',
+                                        alignItems: 'center',
+                                        justifyContent: 'center',
+                                        padding: '4px'
+                                    }}
+                                >
+                                    &times;
+                                </button>
+                            )}
                         </div>
                     </div>
                     <div className="db-toolbar-right">

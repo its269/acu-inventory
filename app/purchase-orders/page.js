@@ -65,27 +65,12 @@ function fmtDate(d) {
 
 export default function PurchaseOrdersPage() {
     const [orders, setOrders] = useState([]);
-    const [page, setPage] = useState(() => {
-        if (typeof window !== "undefined") {
-            const stored = localStorage.getItem("po_filter_page");
-            return stored ? parseInt(stored) : 1;
-        }
-        return 1;
-    });
+    const [page, setPage] = useState(1);
     const [hasMore, setHasMore] = useState(false);
-    const [search, setSearch] = useState(() => {
-        if (typeof window !== "undefined") return localStorage.getItem("po_filter_search") || "";
-        return "";
-    });
+    const [search, setSearch] = useState("");
     const [debSearch, setDebSearch] = useState("");
-    const [startDate, setStartDate] = useState(() => {
-        if (typeof window !== "undefined") return localStorage.getItem("po_filter_startDate") || "";
-        return "";
-    });
-    const [status, setStatus] = useState(() => {
-        if (typeof window !== "undefined") return localStorage.getItem("po_filter_status") || "Open";
-        return "Open";
-    });
+    const [startDate, setStartDate] = useState("");
+    const [status, setStatus] = useState("Open");
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState(null);
     const [expanded, setExpanded] = useState({}); // orderNbr -> bool
@@ -94,17 +79,44 @@ export default function PurchaseOrdersPage() {
 
     const isInitialMount = useRef(true);
 
-    // Load user inputs from localStorage
+    // Initial restoration & Hydration fix
     useEffect(() => {
-        const saved = localStorage.getItem("po_user_inputs");
-        if (saved) {
-            try {
-                const parsed = JSON.parse(saved);
-                setTimeout(() => setUserInputs(parsed), 0);
-            } catch (e) {
-                console.error("Failed to parse po_user_inputs", e);
+        const savedInputs = localStorage.getItem("po_user_inputs");
+        const savedPage = localStorage.getItem("po_filter_page");
+        const savedSearch = localStorage.getItem("po_filter_search");
+        const savedStart = localStorage.getItem("po_filter_startDate");
+        const savedStatus = localStorage.getItem("po_filter_status");
+
+        Promise.resolve().then(() => {
+            if (savedInputs) {
+                try {
+                    setUserInputs(JSON.parse(savedInputs));
+                } catch (e) {
+                    console.error("Failed to parse po_user_inputs", e);
+                }
             }
-        }
+
+            if (savedPage) setPage(parseInt(savedPage));
+            if (savedSearch) setSearch(savedSearch);
+            if (savedStart) setStartDate(savedStart);
+            if (savedStatus) setStatus(savedStatus);
+
+            // Pre-fetch check from cache
+            const params = new URLSearchParams({
+                page: savedPage || "1",
+                pageSize: String(PAGE_SIZE),
+                startDate: savedStart || "",
+                status: savedStatus || "Open"
+            });
+            if (savedSearch) params.set("search", savedSearch);
+            const cacheKey = `po_orders_${params.toString()}`;
+            const cached = DataCache.get(cacheKey);
+            if (cached) {
+                setOrders(cached.orders ?? []);
+                setHasMore(cached.hasMore ?? false);
+            }
+            isInitialMount.current = false;
+        });
     }, []);
 
     // Save user inputs to localStorage
@@ -123,10 +135,12 @@ export default function PurchaseOrdersPage() {
 
     // Save filters to localStorage
     useEffect(() => {
-        localStorage.setItem("po_filter_page", page.toString());
-        localStorage.setItem("po_filter_search", search);
-        localStorage.setItem("po_filter_startDate", startDate);
-        localStorage.setItem("po_filter_status", status);
+        if (!isInitialMount.current) {
+            localStorage.setItem("po_filter_page", page.toString());
+            localStorage.setItem("po_filter_search", search);
+            localStorage.setItem("po_filter_startDate", startDate);
+            localStorage.setItem("po_filter_status", status);
+        }
     }, [page, search, startDate, status]);
 
     useEffect(() => {
@@ -254,6 +268,27 @@ export default function PurchaseOrdersPage() {
                                 value={search}
                                 onChange={e => setSearch(e.target.value)}
                             />
+                            {search && (
+                                <button 
+                                    className="db-search-clear"
+                                    onClick={() => setSearch("")}
+                                    style={{ 
+                                        position: 'absolute', 
+                                        right: '1rem', 
+                                        background: 'none', 
+                                        border: 'none', 
+                                        color: '#94a3b8', 
+                                        cursor: 'pointer',
+                                        fontSize: '1.2rem',
+                                        display: 'flex',
+                                        alignItems: 'center',
+                                        justifyContent: 'center',
+                                        padding: '4px'
+                                    }}
+                                >
+                                    &times;
+                                </button>
+                            )}
                         </div>
                     </div>
                 </div>
