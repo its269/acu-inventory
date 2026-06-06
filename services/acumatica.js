@@ -6,6 +6,25 @@ process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
 
 const toISODate = (date) => date.toISOString().split("T")[0];
 
+/** --- DATA EXTRACTION HELPERS --- */
+const getF = (obj, keyName) => {
+    if (!obj) return "";
+    const k = Object.keys(obj).find(i => i.toLowerCase() === keyName.toLowerCase());
+    if (!k) return "";
+    const val = obj[k];
+    if (val === null || val === undefined) return "";
+    if (typeof val === "object") return val.value ?? "";
+    return val;
+};
+
+const getAny = (obj, ...keys) => {
+    for (const k of keys) {
+        const v = getF(obj, k);
+        if (v !== "" && v !== null && v !== undefined) return v;
+    }
+    return "";
+};
+
 // --- SALES SYNC STATE MANAGEMENT ---
 let activeSalesSyncId = 0;
 let salesAbortController = null;
@@ -28,7 +47,18 @@ export const AcumaticaService = {
                 });
                 if (res.status === 401) throw new Error("Unauthorized");
                 if (res.ok) return res;
-                lastError = new Error(`HTTP ${res.status} from ${url}`);
+
+                // Try to get detailed error from body
+                let errorDetail = "";
+                try {
+                    const errJson = await res.json();
+                    errorDetail = errJson.message || errJson.exceptionMessage || JSON.stringify(errJson);
+                } catch {
+                    errorDetail = `HTTP ${res.status}`;
+                }
+
+                lastError = new Error(`${errorDetail} (from ${url})`);
+                if (res.status < 500) break; // Don't retry client errors
                 await new Promise(r => setTimeout(r, 1000 * attempts));
             } catch (err) {
                 if (err.name === 'AbortError') throw err;
@@ -77,13 +107,18 @@ export const AcumaticaService = {
 
         let filterArr = [];
         if (search) {
-            filterArr.push(`(contains(InventoryID, '${search}') or contains(Description, '${search}'))`);
+            const s = search.replace(/'/g, "''");
+            // Using startswith for ID fields is more reliable in Acumatica OData than contains
+            filterArr.push(`(startswith(InventoryID, '${s}') or contains(Description, '${s}'))`);
         }
 
-        let url = `${ACU_BASE}/StockItem?$expand=WarehouseDetails&$top=${top}&$skip=${skip}`;
+        let queryParams = [`$expand=WarehouseDetails`, `$top=${top}`, `$skip=${skip}`];
         if (filterArr.length > 0) {
-            url += `&$filter=${filterArr.join(" and ")}`;
+            queryParams.push(`$filter=${encodeURIComponent(filterArr.join(" and "))}`);
         }
+
+        const url = `${ACU_BASE}/StockItem?${queryParams.join("&")}`;
+        console.log(`>>> [Acumatica] Fetching StockItems: ${url}`);
 
         const res = await this.fetchWithRetry(url, cookie);
         const data = await res.json();
@@ -152,7 +187,9 @@ export const AcumaticaService = {
 
         let filterArr = [];
         if (search) {
-            filterArr.push(`(contains(OrderNbr, '${search}') or contains(VendorID, '${search}') or contains(VendorName, '${search}') or Details/any(d: contains(d/InventoryID, '${search}')))`);
+            const s = search.replace(/'/g, "''");
+            // Using startswith for ID fields is more reliable in Acumatica OData than contains
+            filterArr.push(`(startswith(OrderNbr, '${s}') or startswith(VendorID, '${s}') or contains(VendorName, '${s}'))`);
         }
         if (status) {
             filterArr.push(`Status eq '${status}'`);
@@ -161,8 +198,17 @@ export const AcumaticaService = {
             filterArr.push(`Date ge datetimeoffset'${startDate}T00:00:00Z'`);
         }
 
-        const filter = filterArr.length > 0 ? `&$filter=${filterArr.join(" and ")}` : "";
-        const url = `${ACU_BASE}/PurchaseOrder?$expand=Details&$top=${top}&$skip=${skip}${filter}&$orderby=Date desc,OrderNbr desc`;
+        let queryParams = [
+            `$expand=Details`,
+            `$top=${top}`,
+            `$skip=${skip}`,
+            `$orderby=${encodeURIComponent("Date desc,OrderNbr desc")}`
+        ];
+        if (filterArr.length > 0) {
+            queryParams.push(`$filter=${encodeURIComponent(filterArr.join(" and "))}`);
+        }
+
+        const url = `${ACU_BASE}/PurchaseOrder?${queryParams.join("&")}`;
 
         console.log(`>>> [Acumatica] Fetching PO: ${url}`);
         const res = await this.fetchWithRetry(url, cookie);
@@ -178,9 +224,9 @@ export const AcumaticaService = {
             vendorId: getF(po, "VendorID"),
             vendorName: getF(po, "VendorName"),
             totalAmount: parseFloat(getF(po, "OrderTotal") || 0),
-            lines: (po.Details || []).map(line => ({
+            lines: (po.Details?.value || po.Details || []).map(line => ({
                 inventoryId: getF(line, "InventoryID"),
-                description: getF(line, "Description"),
+                description: getAny(line, "LineDescription", "Description"),
                 qty: parseFloat(getF(line, "OrderQty") || 0),
                 uom: getF(line, "UOM"),
                 extCost: parseFloat(getF(line, "LineAmount") || 0)
@@ -195,19 +241,24 @@ export const AcumaticaService = {
         const skip = (page - 1) * pageSize;
         const top = pageSize + 1;
 
-        // Re-integrating MySQL performance scores for accuracy, 
-        // as the local database now contains the necessary PO history.
+        // Re-integrating MySQL performance scores for accuracy
         const performanceMap = await MySqlService.getSupplierPerformance();
 
         let filterArr = [];
         if (search) {
-            filterArr.push(`(contains(VendorID, '${search}') or contains(VendorName, '${search}'))`);
+            const s = search.replace(/'/g, "''");
+            // Using startswith for ID fields is more reliable in Acumatica OData than contains
+            filterArr.push(`(startswith(VendorID, '${s}') or contains(VendorName, '${s}'))`);
         }
 
-        const filter = filterArr.length > 0 ? `&$filter=${filterArr.join(" and ")}` : "";
-        const url = `${ACU_BASE}/Vendor?$top=${top}&$skip=${skip}${filter}`;
+        let queryParams = [`$top=${top}`, `$skip=${skip}`];
+        if (filterArr.length > 0) {
+            queryParams.push(`$filter=${encodeURIComponent(filterArr.join(" and "))}`);
+        }
 
-        console.log(`>>> [Acumatica] Fetching Vendors (Hybrid Source: Names from ACU, Scores from MySQL): ${url}`);
+        const url = `${ACU_BASE}/Vendor?${queryParams.join("&")}`;
+
+        console.log(`>>> [Acumatica] Fetching Vendors: ${url}`);
         const res = await this.fetchWithRetry(url, cookie);
         const data = await res.json();
         const rawVendors = data.value || (Array.isArray(data) ? data : []);
@@ -231,15 +282,6 @@ export const AcumaticaService = {
 
     /** ── REPLENISHMENT RECOMMENDATIONS ── */
     async getReplenishmentRecommendations({ cookie }) {
-        // Helper to try multiple field names
-        const getAny = (obj, ...keys) => {
-            for (const k of keys) {
-                const v = getF(obj, k);
-                if (v !== "" && v !== null && v !== undefined) return v;
-            }
-            return "";
-        };
-
         // We derive recommendations from active items with low stock availability
         // Scan 300 items to ensure we find enough low-stock candidates
         const url = `${ACU_BASE}/StockItem?$expand=WarehouseDetails&$top=300&$filter=ItemStatus eq 'Active'`;
@@ -393,14 +435,4 @@ export const AcumaticaService = {
             if (activeSalesSyncId === syncId) salesAbortController = null;
         }
     }
-};
-
-const getF = (obj, keyName) => {
-    if (!obj) return "";
-    const k = Object.keys(obj).find(i => i.toLowerCase() === keyName.toLowerCase());
-    if (!k) return "";
-    const val = obj[k];
-    if (val === null || val === undefined) return "";
-    if (typeof val === "object") return val.value ?? "";
-    return val;
 };

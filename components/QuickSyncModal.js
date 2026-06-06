@@ -188,7 +188,7 @@ export default function QuickSyncModal({ isOpen, onClose, onStatusChange }) {
                             <button className={`qs-card ${syncType === 'delta' ? 'active' : ''}`} onClick={() => setSyncType('delta')}>
                                 <div className="qs-card-icon"><IconRocket /></div>
                                 <div className="qs-card-info">
-                                    <span className="qs-card-title">Sync Today's Changes</span>
+                                    <span className="qs-card-title">Sync Today&apos;s Changes</span>
                                     <span className="qs-card-desc">Only sync items sold or updated today.</span>
                                 </div>
                             </button>

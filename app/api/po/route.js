@@ -7,11 +7,9 @@ export const dynamic = "force-dynamic";
 
 export async function GET(request) {
     const sessionId = request.cookies.get("acu_session")?.value;
-    console.log(`[PO API] Request received. sessionId: ${sessionId || "(none)"}`);
-    
     const cookie = getSession(sessionId);
+    
     if (!cookie) {
-        console.warn(`[PO API] Unauthorized: No valid session found for sessionId: ${sessionId || "(none)"}`);
         return NextResponse.json({ message: "Unauthorized" }, { status: 401 });
     }
 
@@ -39,9 +37,6 @@ export async function GET(request) {
         });
     } catch (err) {
         console.error("[PO API Error]", err);
-        if (err.message === "Unauthorized") {
-            return NextResponse.json({ message: "Unauthorized" }, { status: 401 });
-        }
         return NextResponse.json({ message: err.message }, { status: 500 });
     }
 }

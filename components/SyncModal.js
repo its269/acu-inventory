@@ -109,7 +109,15 @@ export default function SyncModal({ isOpen, onClose, onSyncComplete }) {
                         const data = JSON.parse(line);
                         if (data.section) {
                             setSections(prev => {
-                                const newSections = { ...prev, [data.section]: { status: data.status, details: data.details, progress: data.progress } };
+                                const newSections = { 
+                                    ...prev, 
+                                    [data.section]: { 
+                                        status: data.status, 
+                                        details: data.details, 
+                                        progress: data.progress,
+                                        count: data.count || prev[data.section]?.count || 0
+                                    } 
+                                };
                                 const sectionValues = Object.values(newSections);
                                 const totalProg = sectionValues.reduce((acc, s) => acc + (s.progress || 0), 0);
                                 setOverallProgress(Math.floor(totalProg / selectedCount));
@@ -174,7 +182,21 @@ export default function SyncModal({ isOpen, onClose, onSyncComplete }) {
                                 {Object.entries(sections).map(([name, data]) => (
                                     <div key={name} style={{ display: 'flex', flexDirection: 'column', gap: '0.4rem' }}>
                                         <div className="sync-progress-label">
-                                            <span style={{ fontSize: '0.85rem', fontWeight: '500' }}>{name}</span>
+                                            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                                                <span style={{ fontSize: '0.85rem', fontWeight: '500' }}>{name}</span>
+                                                {data.count > 0 && (
+                                                    <span style={{ 
+                                                        fontSize: '0.7rem', 
+                                                        background: '#f1f5f9', 
+                                                        padding: '1px 6px', 
+                                                        borderRadius: '10px', 
+                                                        color: '#64748b',
+                                                        fontWeight: '600'
+                                                    }}>
+                                                        {data.count.toLocaleString()} {name === 'Inventory' ? 'items' : 'records'}
+                                                    </span>
+                                                )}
+                                            </div>
                                             <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>{displaySections[name] || 0}%</span>
                                         </div>
                                         <div className="sync-progress-track">

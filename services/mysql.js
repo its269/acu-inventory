@@ -600,7 +600,7 @@ export const MySqlService = {
             // Update item_class and posting_class from inventory_items catalog where missing
             const sql = `
                 UPDATE product_periodic_sales s
-                JOIN inventory_items i ON TRIM(UPPER(s.inventory_id)) = TRIM(UPPER(i.inventory_id))
+                JOIN inventory_items i ON s.inventory_id = i.inventory_id
                 SET 
                     s.item_class = COALESCE(s.item_class, i.item_class),
                     s.posting_class = COALESCE(s.posting_class, i.posting_class)
